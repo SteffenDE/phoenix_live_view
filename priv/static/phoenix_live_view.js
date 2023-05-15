@@ -3497,7 +3497,7 @@ within:
             cid
           }, onReply);
         });
-      } else if (!formEl.hasAttribute(PHX_REF)) {
+      } else {
         let meta = this.extractMeta(formEl);
         let formData = serializeForm(formEl, __spreadValues({ submitter }, meta));
         this.pushWithReply(refGenerator, "event", {
