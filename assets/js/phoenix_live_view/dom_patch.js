@@ -107,11 +107,9 @@ export default class DOMPatch {
         })
         if(reset !== undefined){
           DOM.all(container, `[${PHX_STREAM_REF}="${ref}"]`, child => {
-            if(inserts[child.id]){
-              this.streamInserts[child.id].resetKept = true
-            } else {
+            // if(!inserts[child.id]){
               this.removeStreamChildElement(child)
-            }
+            // }
           })
         }
         deleteIds.forEach(id => {
@@ -187,27 +185,6 @@ export default class DOMPatch {
             this.trackAfter("phxChildAdded", el)
           }
           added.push(el)
-        },
-        onBeforeElChildrenUpdated: (fromEl, toEl) => {
-          // before we update the children, we need to set existing stream children
-          // into the new order from the server if they were kept during a stream reset
-          if(fromEl.getAttribute(phxUpdate) === PHX_STREAM){
-            let toIds = Array.from(toEl.children).map(child => child.id)
-            Array.from(fromEl.children).filter(child => {
-              let {resetKept} = this.getStreamInsert(child)
-              return resetKept
-            }).sort((a, b) => {
-              let aIdx = toIds.indexOf(a.id)
-              let bIdx = toIds.indexOf(b.id)
-              if(aIdx === bIdx){
-                return 0
-              } else if(aIdx < bIdx){
-                return -1
-              } else {
-                return 1
-              }
-            }).forEach(child => fromEl.appendChild(child))
-          }
         },
         onNodeDiscarded: (el) => this.onNodeDiscarded(el),
         onBeforeNodeDiscarded: (el) => {
