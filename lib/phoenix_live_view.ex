@@ -316,7 +316,6 @@ defmodule Phoenix.LiveView do
   Uses LiveView in the current module to mark it a LiveView.
 
       use Phoenix.LiveView,
-        namespace: MyAppWeb,
         container: {:tr, class: "colorized"},
         layout: {MyAppWeb.LayoutView, :app},
         log: :info
@@ -334,9 +333,8 @@ defmodule Phoenix.LiveView do
       This layout can be overridden by on `c:mount/3` or via the `:layout`
       option in `Phoenix.LiveView.Router.live_session/2`
 
-    * `:log` - configures the log level for the `LiveView`
-
-    * `:namespace` - configures the namespace the `LiveView` is in
+    * `:log` - configures the log level for the `LiveView`, either false
+      or a Log level
 
   """
 
@@ -368,6 +366,45 @@ defmodule Phoenix.LiveView do
   defmacro __before_compile__(env) do
     opts = Module.get_attribute(env.module, :phoenix_live_opts)
 
+    on_mount =
+      env.module
+      |> Module.get_attribute(:phoenix_live_mount)
+      |> Enum.reverse()
+
+    live = Phoenix.LiveView.__live__([on_mount: on_mount] ++ opts)
+
+    quote do
+      @doc false
+      def __live__ do
+        unquote(Macro.escape(live))
+      end
+    end
+  end
+
+  @doc """
+  Defines metadata for a LiveView.
+
+  This must be returned from the `__live__` callback.
+
+  It accepts:
+
+    * `:container` - an optional tuple for the HTML tag and DOM attributes to
+      be used for the LiveView container. For example: `{:li, style: "color: blue;"}`.
+
+    * `:layout` - configures the layout the `LiveView` will be rendered in.
+      This layout can be overridden by on `c:mount/3` or via the `:layout`
+      option in `Phoenix.LiveView.Router.live_session/2`
+
+    * `:log` - configures the log level for the `LiveView`, either false
+      or a log level
+
+    * `:on_mount` - a list of tuples with module names and argument to be invoked
+      as `on_mount` hooks
+
+  """
+  def __live__(opts \\ []) do
+    on_mount = opts[:on_mount] || []
+
     layout =
       Phoenix.LiveView.Utils.normalize_layout(Keyword.get(opts, :layout, false), "use options")
 
@@ -379,31 +416,15 @@ defmodule Phoenix.LiveView do
         _ -> raise ArgumentError, ":log expects an atom or false, got: #{inspect(opts[:log])}"
       end
 
-    phoenix_live_mount = Module.get_attribute(env.module, :phoenix_live_mount)
-    lifecycle = Phoenix.LiveView.Lifecycle.mount(env.module, phoenix_live_mount)
-
-    namespace =
-      opts[:namespace] || env.module |> Module.split() |> Enum.take(1) |> Module.concat()
-
-    name = env.module |> Atom.to_string() |> String.replace_prefix("#{namespace}.", "")
     container = opts[:container] || {:div, []}
 
-    live = %{
+    %{
       container: container,
-      name: name,
       kind: :view,
-      module: env.module,
       layout: layout,
-      lifecycle: lifecycle,
+      lifecycle: Phoenix.LiveView.Lifecycle.build(on_mount),
       log: log
     }
-
-    quote do
-      @doc false
-      def __live__ do
-        unquote(Macro.escape(live))
-      end
-    end
   end
 
   @doc """
@@ -435,6 +456,10 @@ defmodule Phoenix.LiveView do
   Registering `on_mount` hooks can be useful to perform authentication
   as well as add custom behaviour to other callbacks via `attach_hook/4`.
 
+  The `on_mount` callback can return a keyword list of options as a third
+  element in the return tuple. These options are identical to what can
+  optionally be returned in `mount/3`.
+
   ## Examples
 
   The following is an example of attaching a hook via
@@ -456,8 +481,8 @@ defmodule Phoenix.LiveView do
           # code
         end
 
-        def on_mount(:admin, params, session, socket) do
-          # code
+        def on_mount(:admin, _params, _session, socket) do
+          {:cont, socket, layout: {DemoWeb.Layouts, :admin}}
         end
       end
 
@@ -502,7 +527,7 @@ defmodule Phoenix.LiveView do
       Module.put_attribute(
         __MODULE__,
         :phoenix_live_mount,
-        Phoenix.LiveView.Lifecycle.on_mount(__MODULE__, unquote(mod_or_mod_arg))
+        Phoenix.LiveView.Lifecycle.validate_on_mount!(__MODULE__, unquote(mod_or_mod_arg))
       )
     end
   end
@@ -658,9 +683,12 @@ defmodule Phoenix.LiveView do
 
     2. They can be handled inside a hook via `handleEvent`.
 
-  Note that events are dispatched to all active hooks on the client who are
-  handling the given `event`. If you need to scope events, then this must
-  be done by namespacing them.
+  Events are dispatched to all active hooks on the client who are
+  handling the given `event`. If you need to scope events, then
+  this must be done by namespacing them.
+
+  Events pushed during `push_redirect` are currently discarded,
+  as the LiveView is immediately dismounted.
 
   ## Hook example
 
@@ -711,7 +739,9 @@ defmodule Phoenix.LiveView do
       upload channel when a new chunk has not been received. Defaults `10_000`.
 
     * `:external` - The 2-arity function for generating metadata for external
-      client uploaders. See the Uploads section for example usage.
+      client uploaders. This function must return either `{:ok, meta, socket}`
+      or `{:error, meta, socket}` where meta is a map. See the Uploads section
+      for example usage.
 
     * `:progress` - The optional 3-arity function for receiving progress events
 
@@ -1372,7 +1402,7 @@ defmodule Phoenix.LiveView do
   lifecycle in order to bind/update assigns, intercept events,
   patches, and regular messages when necessary, and to inject
   common functionality. Use `attach_hook/1` on any of the following
-  lifecycle stages: `:handle_params`, `:handle_event`, `:handle_info`, and
+  lifecycle stages: `:handle_params`, `:handle_event`, `:handle_info`, `:handle_async`, and
   `:after_render`. To attach a hook to the `:mount` stage, use `on_mount/1`.
 
   > Note: only `:after_render` hooks are currently supported in LiveComponents.
@@ -1829,6 +1859,11 @@ defmodule Phoenix.LiveView do
 
   The task is only started when the socket is connected.
 
+  ## Options
+
+    * `:supervisor` - allows you to specify a `Task.Supervisor` to supervise the task.
+
+
   ## Examples
 
       def mount(%{"slug" => slug}, _, socket) do
@@ -1853,12 +1888,11 @@ defmodule Phoenix.LiveView do
         # ...
         send_update(parent, Component, data)
       end)
-
   """
-  def assign_async(%Socket{} = socket, key_or_keys, func)
+  def assign_async(%Socket{} = socket, key_or_keys, func, opts \\ [])
       when (is_atom(key_or_keys) or is_list(key_or_keys)) and
              is_function(func, 0) do
-    Async.assign_async(socket, key_or_keys, func)
+    Async.assign_async(socket, key_or_keys, func, opts)
   end
 
   @doc """

@@ -320,7 +320,12 @@ defmodule Phoenix.LiveView.Router do
         """
 
       {:on_mount, on_mount}, acc ->
-        hooks = Enum.map(List.wrap(on_mount), &Phoenix.LiveView.Lifecycle.on_mount(module, &1))
+        hooks =
+          on_mount
+          |> List.wrap()
+          |> Enum.map(&Phoenix.LiveView.Lifecycle.validate_on_mount!(module, &1))
+          |> Phoenix.LiveView.Lifecycle.prepare_on_mount!()
+
         Map.put(acc, :on_mount, hooks)
 
       {key, _val}, _acc ->
@@ -358,7 +363,7 @@ defmodule Phoenix.LiveView.Router do
         ...
       end
   """
-  def fetch_live_flash(%Plug.Conn{} = conn, _) do
+  def fetch_live_flash(%Plug.Conn{} = conn, _opts \\ []) do
     case cookie_flash(conn) do
       {conn, nil} ->
         Phoenix.Controller.fetch_flash(conn, [])

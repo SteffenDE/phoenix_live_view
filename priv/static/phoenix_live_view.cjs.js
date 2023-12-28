@@ -538,12 +538,17 @@ var DOM = {
       el.setAttribute("data-phx-hook", "Phoenix.InfiniteScroll");
     }
   },
-  maybeHideFeedback(container, input, phxFeedbackFor) {
-    if (!(this.private(input, PHX_HAS_FOCUSED) || this.private(input, PHX_HAS_SUBMITTED))) {
-      let feedbacks = [input.name];
-      if (input.name.endsWith("[]")) {
-        feedbacks.push(input.name.slice(0, -2));
+  maybeHideFeedback(container, inputs, phxFeedbackFor) {
+    let feedbacks = [];
+    inputs.forEach((input) => {
+      if (!(this.private(input, PHX_HAS_FOCUSED) || this.private(input, PHX_HAS_SUBMITTED))) {
+        feedbacks.push(input.name);
+        if (input.name.endsWith("[]")) {
+          feedbacks.push(input.name.slice(0, -2));
+        }
       }
+    });
+    if (feedbacks.length > 0) {
       let selector = feedbacks.map((f) => `[${phxFeedbackFor}="${f}"]`).join(", ");
       DOM.all(container, selector, (el) => el.classList.add(PHX_NO_FEEDBACK_CLASS));
     }
@@ -980,7 +985,7 @@ var ARIA = {
     return classes.find((name) => instance instanceof name);
   },
   isFocusable(el, interactiveOnly) {
-    return el instanceof HTMLAnchorElement && el.rel !== "ignore" || el instanceof HTMLAreaElement && el.href !== void 0 || !el.disabled && this.anyOf(el, [HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement, HTMLButtonElement]) || el instanceof HTMLIFrameElement || (el.tabIndex > 0 || !interactiveOnly && el.tabIndex === 0 && el.getAttribute("tabindex") !== null && el.getAttribute("aria-hidden") !== "true");
+    return el instanceof HTMLAnchorElement && el.rel !== "ignore" || el instanceof HTMLAreaElement && el.href !== void 0 || !el.disabled && this.anyOf(el, [HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement, HTMLButtonElement]) || el instanceof HTMLIFrameElement || (el.tabIndex > 0 || !interactiveOnly && el.getAttribute("tabindex") !== null && el.getAttribute("aria-hidden") !== "true");
   },
   attemptFocus(el, interactiveOnly) {
     if (this.isFocusable(el, interactiveOnly)) {
@@ -1956,9 +1961,7 @@ var DOMPatch = class {
         appendPrependUpdates.forEach((update) => update.perform());
       });
     }
-    trackedInputs.forEach((input) => {
-      dom_default.maybeHideFeedback(targetContainer, input, phxFeedbackFor);
-    });
+    dom_default.maybeHideFeedback(targetContainer, trackedInputs, phxFeedbackFor);
     liveSocket.silenceEvents(() => dom_default.restoreFocus(focused, selectionStart, selectionEnd));
     dom_default.dispatchEvent(document, "phx:update");
     added.forEach((el) => this.trackAfter("added", el));
@@ -2074,65 +2077,41 @@ var VOID_TAGS = new Set([
   "track",
   "wbr"
 ]);
-var endingTagNameChars = new Set([">", "/", " ", "\n", "	", "\r"]);
 var quoteChars = new Set(["'", '"']);
 var modifyRoot = (html, attrs, clearInnerHTML) => {
   let i = 0;
   let insideComment = false;
   let beforeTag, afterTag, tag, tagNameEndsAt, id, newHTML;
-  while (i < html.length) {
-    let char = html.charAt(i);
-    if (insideComment) {
-      if (char === "-" && html.slice(i, i + 3) === "-->") {
-        insideComment = false;
-        i += 3;
-      } else {
-        i++;
-      }
-    } else if (char === "<" && html.slice(i, i + 4) === "<!--") {
-      insideComment = true;
-      i += 4;
-    } else if (char === "<") {
-      beforeTag = html.slice(0, i);
-      let iAtOpen = i;
+  let lookahead = html.match(/^(\s*(?:<!--.*?-->\s*)*)<([^\s\/>]+)/);
+  if (lookahead === null) {
+    throw new Error(`malformed html ${html}`);
+  }
+  i = lookahead[0].length;
+  beforeTag = lookahead[1];
+  tag = lookahead[2];
+  tagNameEndsAt = i;
+  for (i; i < html.length; i++) {
+    if (html.charAt(i) === ">") {
+      break;
+    }
+    if (html.charAt(i) === "=") {
+      let isId = html.slice(i - 3, i) === " id";
       i++;
-      for (i; i < html.length; i++) {
-        if (endingTagNameChars.has(html.charAt(i))) {
-          break;
-        }
-      }
-      tagNameEndsAt = i;
-      tag = html.slice(iAtOpen + 1, tagNameEndsAt);
-      for (i; i < html.length; i++) {
-        if (html.charAt(i) === ">") {
-          break;
-        }
-        if (html.charAt(i) === "=") {
-          let isId = html.slice(i - 3, i) === " id";
-          i++;
-          let char2 = html.charAt(i);
-          if (quoteChars.has(char2)) {
-            let attrStartsAt = i;
-            i++;
-            for (i; i < html.length; i++) {
-              if (html.charAt(i) === char2) {
-                break;
-              }
-            }
-            if (isId) {
-              id = html.slice(attrStartsAt + 1, i);
-              break;
-            }
+      let char = html.charAt(i);
+      if (quoteChars.has(char)) {
+        let attrStartsAt = i;
+        i++;
+        for (i; i < html.length; i++) {
+          if (html.charAt(i) === char) {
+            break;
           }
         }
+        if (isId) {
+          id = html.slice(attrStartsAt + 1, i);
+          break;
+        }
       }
-      break;
-    } else {
-      i++;
     }
-  }
-  if (!tag) {
-    throw new Error(`malformed html ${html}`);
   }
   let closeAt = html.length - 1;
   insideComment = false;
@@ -2487,6 +2466,10 @@ var JS = {
   },
   isVisible(el) {
     return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length > 0);
+  },
+  isInViewport(el) {
+    const rect = el.getBoundingClientRect();
+    return rect.top >= 0 && rect.left >= 0 && rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && rect.right <= (window.innerWidth || document.documentElement.clientWidth);
   },
   exec_exec(eventType, phxEvent, view, sourceEl, el, [attr, to]) {
     let nodes = to ? dom_default.all(document, to) : [sourceEl];
@@ -4197,7 +4180,7 @@ var LiveSocket = class {
     if (!dead) {
       this.bindForms();
     }
-    this.bind({ keyup: "keyup", keydown: "keydown" }, (e, type, view, targetEl, phxEvent, eventTarget) => {
+    this.bind({ keyup: "keyup", keydown: "keydown" }, (e, type, view, targetEl, phxEvent, phxTarget) => {
       let matchKey = targetEl.getAttribute(this.binding(PHX_KEY));
       let pressedKey = e.key && e.key.toLowerCase();
       if (matchKey && matchKey.toLowerCase() !== pressedKey) {
@@ -4206,13 +4189,13 @@ var LiveSocket = class {
       let data = { key: e.key, ...this.eventMeta(type, e, targetEl) };
       js_default.exec(type, phxEvent, view, targetEl, ["push", { data }]);
     });
-    this.bind({ blur: "focusout", focus: "focusin" }, (e, type, view, targetEl, phxEvent, eventTarget) => {
-      if (!eventTarget) {
+    this.bind({ blur: "focusout", focus: "focusin" }, (e, type, view, targetEl, phxEvent, phxTarget) => {
+      if (!phxTarget) {
         let data = { key: e.key, ...this.eventMeta(type, e, targetEl) };
         js_default.exec(type, phxEvent, view, targetEl, ["push", { data }]);
       }
     });
-    this.bind({ blur: "blur", focus: "focus" }, (e, type, view, targetEl, targetCtx, phxEvent, phxTarget) => {
+    this.bind({ blur: "blur", focus: "focus" }, (e, type, view, targetEl, phxEvent, phxTarget) => {
       if (phxTarget === "window") {
         let data = this.eventMeta(type, e, targetEl);
         js_default.exec(type, phxEvent, view, targetEl, ["push", { data }]);
@@ -4293,7 +4276,7 @@ var LiveSocket = class {
     }
   }
   bindClicks() {
-    window.addEventListener("click", (e) => this.clickStartedAtTarget = e.target);
+    window.addEventListener("mousedown", (e) => this.clickStartedAtTarget = e.target);
     this.bindClick("click", "click", false);
     this.bindClick("mousedown", "capture-click", true);
   }
@@ -4335,7 +4318,7 @@ var LiveSocket = class {
       if (!(el.isSameNode(clickStartedAt) || el.contains(clickStartedAt))) {
         this.withinOwners(e.target, (view) => {
           let phxEvent = el.getAttribute(phxClickAway);
-          if (js_default.isVisible(el)) {
+          if (js_default.isVisible(el) && js_default.isInViewport(el)) {
             js_default.exec("click", phxEvent, view, el, ["push", { data: this.eventMeta("click", e, e.target) }]);
           }
         });
@@ -4384,7 +4367,7 @@ var LiveSocket = class {
       if (!type || !this.isConnected() || !this.main || dom_default.wantsNewTab(e)) {
         return;
       }
-      let href = target.href;
+      let href = target.href instanceof SVGAnimatedString ? target.href.baseVal : target.href;
       let linkState = target.getAttribute(PHX_LINK_STATE);
       e.preventDefault();
       e.stopImmediatePropagation();

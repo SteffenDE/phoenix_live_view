@@ -273,21 +273,22 @@ defmodule Phoenix.LiveViewTest.DOM do
 
   def render_diff(rendered) do
     rendered
-    |> Phoenix.LiveView.Diff.to_iodata(fn cid, contents ->
-      contents
-      |> IO.iodata_to_binary()
-      |> parse()
-      |> List.wrap()
-      |> Enum.map(walk_fun(&inject_cid_attr(&1, cid)))
-      |> to_html()
-    end)
+    |> Phoenix.LiveView.Diff.to_iodata(&add_cid_attr/2)
     |> IO.iodata_to_binary()
     |> parse()
     |> List.wrap()
   end
 
-  defp inject_cid_attr({tag, attrs, children}, cid) do
-    {tag, [{@phx_component, to_string(cid)}] ++ attrs, children}
+  defp add_cid_attr(cid, [head | tail]) do
+    head_with_cid =
+      Regex.replace(
+        ~r/^(\s*(?:<!--.*?-->\s*)*)<([^\s\/>]+)/,
+        IO.iodata_to_binary(head),
+        "\\0 #{@phx_component}=\"#{to_string(cid)}\"",
+        global: false
+      )
+
+    [head_with_cid | tail]
   end
 
   # Patching
@@ -432,6 +433,10 @@ defmodule Phoenix.LiveViewTest.DOM do
         new_children =
           Enum.reduce(stream_inserts, children, fn {id, {ref, insert_at, _limit}}, acc ->
             old_index = Enum.find_index(acc, &(attribute(&1, "id") == id))
+
+            not_appended? =
+              is_nil(Enum.find_index(updated_appended, &(attribute(&1, "id") == id)))
+
             existing? = Enum.find_index(updated_existing_children, &(attribute(&1, "id") == id))
             deleted? = MapSet.member?(stream_deletes, id)
 
@@ -441,9 +446,14 @@ defmodule Phoenix.LiveViewTest.DOM do
                 child -> set_attr(child, "data-phx-stream", ref)
               end
 
+            parent_id = parent_id(html_tree, id)
+
             cond do
-              # skip added children that aren't ours
-              parent_id(html_tree, id) != container_id ->
+              !child ->
+                acc
+
+              # skip added children that aren't ours if they are not being appended
+              not_appended? && parent_id && parent_id != container_id ->
                 acc
 
               # do not append existing child if already present, only update in place
@@ -586,7 +596,7 @@ defmodule Phoenix.LiveViewTest.DOM do
     |> parse_sorted!()
   end
 
-  @doc"""
+  @doc """
   Parses HTML into Floki format with sorted attributes.
   """
   def parse_sorted!(value) do

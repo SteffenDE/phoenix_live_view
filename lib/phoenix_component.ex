@@ -2418,20 +2418,30 @@ defmodule Phoenix.Component do
 
     forms = parent_form.impl.to_form(parent_form.source, parent_form, field_name, options)
     seen_ids = for f <- forms, vid = f.params[@persistent_id], into: %{}, do: {vid, true}
+    acc = {seen_ids, 0}
 
     {forms, _} =
-      Enum.map_reduce(forms, seen_ids, fn %Phoenix.HTML.Form{params: params} = form, seen_ids ->
-        id =
-          case params do
-            %{@persistent_id => id} -> id
-            %{} -> next_id(map_size(seen_ids), seen_ids)
-          end
+      Enum.map_reduce(forms, acc, fn
+        %Phoenix.HTML.Form{params: params} = form, {seen_ids, index} ->
+          id =
+            case params do
+              %{@persistent_id => id} -> id
+              %{} -> next_id(map_size(seen_ids), seen_ids)
+            end
 
-        form_id = "#{parent_form.id}_#{field_name}_#{id}"
-        new_params = Map.put(params, @persistent_id, id)
-        new_hidden = [{@persistent_id, id} | form.hidden]
-        new_form = %Phoenix.HTML.Form{form | id: form_id, params: new_params, hidden: new_hidden}
-        {new_form, Map.put(seen_ids, id, true)}
+          form_id = "#{parent_form.id}_#{field_name}_#{id}"
+          new_params = Map.put(params, @persistent_id, id)
+          new_hidden = [{@persistent_id, id} | form.hidden]
+
+          new_form = %Phoenix.HTML.Form{
+            form
+            | id: form_id,
+              params: new_params,
+              hidden: new_hidden,
+              index: index
+          }
+
+          {new_form, {Map.put(seen_ids, id, true), index + 1}}
       end)
 
     assigns = assign(assigns, :forms, forms)
@@ -2945,6 +2955,8 @@ defmodule Phoenix.Component do
 
   @doc """
   Renders an async assign with slots for the different loading states.
+  The result state takes precedence over subsequent loading and failed
+  states.
 
   *Note*: The inner block receives the result of the async assign as a :let.
   The let is only accessible to the inner block and is not in scope to the
@@ -2963,19 +2975,29 @@ defmodule Phoenix.Component do
     <% end %>
   </.async_result>
   ```
+
+  To display loading and failed states again on subsequent `assign_async` calls,
+  reset the assign to a result-free `%AsyncResult{}`:
+
+  ```elixir
+  {:noreply,
+    socket
+    |> assign_async(:page, :data, &reload_data/0)
+    |> assign(:page, AsyncResult.loading())}
+  ```
   """
   @doc type: :component
   attr.(:assign, AsyncResult, required: true)
-  slot.(:loading, doc: "rendered while the assign is loading")
+  slot.(:loading, doc: "rendered while the assign is loading for the first time")
 
   slot.(:failed,
     doc:
-      "rendered when an error or exit is caught or assign_async returns `{:error, reason}`. Receives the error as a :let."
+      "rendered when an error or exit is caught or assign_async returns `{:error, reason}` for the first time. Receives the error as a `:let`"
   )
 
   slot.(:inner_block,
     doc:
-      "rendered when the assign is loaded successfully via AsyncResult.ok/2. Receives the result as a :let"
+      "rendered when the assign is loaded successfully via `AsyncResult.ok/2`. Receives the result as a `:let`"
   )
 
   def async_result(%{assign: async_assign} = assigns) do
