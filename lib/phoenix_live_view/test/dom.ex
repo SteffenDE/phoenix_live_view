@@ -434,7 +434,9 @@ defmodule Phoenix.LiveViewTest.DOM do
           Enum.reduce(stream_inserts, children, fn {id, {ref, insert_at, _limit}}, acc ->
             old_index = Enum.find_index(acc, &(attribute(&1, "id") == id))
 
-            existing? = Enum.find_index(updated_existing_children, &(attribute(&1, "id") == id))
+            appended? = Enum.any?(updated_appended, &(attribute(&1, "id") == id))
+
+            existing? = Enum.any?(updated_existing_children, &(attribute(&1, "id") == id))
             deleted? = MapSet.member?(stream_deletes, id)
 
             child =
@@ -447,14 +449,14 @@ defmodule Phoenix.LiveViewTest.DOM do
 
             cond do
               !child ->
-                set_data_phx_stream(acc, id, ref)
+                acc
 
               # skip added children that aren't ours if they are not being appended
-              parent_id != container_id ->
-                set_data_phx_stream(acc, id, ref)
+              not appended? && parent_id && parent_id != container_id ->
+                acc
 
               # do not append existing child if already present, only update in place
-              old_index && insert_at == -1 && existing? ->
+              old_index && insert_at == -1 && (existing? or appended?) ->
                 if deleted? do
                   acc |> List.delete_at(old_index) |> List.insert_at(insert_at, child)
                 else
@@ -575,16 +577,6 @@ defmodule Phoenix.LiveViewTest.DOM do
       |> Kernel.++([{name, val}])
 
     {tag, new_attrs, children}
-  end
-
-  defp set_data_phx_stream(children, id, ref) do
-    Enum.map(children, fn child ->
-      if attribute(child, "id") == id do
-        set_attr(child, "data-phx-stream", ref)
-      else
-        child
-      end
-    end)
   end
 
   defmacro sigil_X({:<<>>, _, [binary]}, []) when is_binary(binary) do

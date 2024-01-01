@@ -1590,7 +1590,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
         }
       }
       function morphChildren(fromEl, toEl) {
-        var skipFrom = skipFromChildren(fromEl, toEl);
+        var skipFrom = skipFromChildren(fromEl);
         var curToNodeChild = toEl.firstChild;
         var curFromNodeChild = fromEl.firstChild;
         var curToNodeKey;
@@ -3019,6 +3019,9 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       let updatedHookIds = new Set();
       patch.after("added", (el) => {
         this.liveSocket.triggerDOM("onNodeAdded", [el]);
+        let phxViewportTop = this.binding(PHX_VIEWPORT_TOP);
+        let phxViewportBottom = this.binding(PHX_VIEWPORT_BOTTOM);
+        dom_default.maybeAddPrivateHooks(el, phxViewportTop, phxViewportBottom);
         this.maybeAddNewHook(el);
         if (el.getAttribute) {
           this.maybeMounted(el);
