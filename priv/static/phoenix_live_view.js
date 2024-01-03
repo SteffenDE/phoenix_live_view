@@ -650,9 +650,7 @@ var LiveView = (() => {
       }
     },
     mergeFocusedInput(target, source) {
-      if (!(target instanceof HTMLSelectElement)) {
-        DOM.mergeAttrs(target, source, { exclude: ["value"] });
-      }
+      DOM.mergeAttrs(target, source, { exclude: ["value"] });
       if (source.readOnly) {
         target.setAttribute("readonly", true);
       } else {
@@ -1939,6 +1937,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
             dom_default.maybeAddPrivateHooks(toEl, phxViewportTop, phxViewportBottom);
             dom_default.cleanChildNodes(toEl, phxUpdate);
             if (this.skipCIDSibling(toEl)) {
+              this.maybeReOrderStream(fromEl);
               return false;
             }
             if (dom_default.isPhxSticky(fromEl)) {
