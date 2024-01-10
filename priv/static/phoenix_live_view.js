@@ -635,7 +635,9 @@ var LiveView = (() => {
       for (let i = sourceAttrs.length - 1; i >= 0; i--) {
         let name = sourceAttrs[i].name;
         if (exclude.indexOf(name) < 0) {
-          target.setAttribute(name, source.getAttribute(name));
+          if (target.getAttribute(name) !== source.getAttribute(name)) {
+            target.setAttribute(name, source.getAttribute(name));
+          }
         }
       }
       let targetAttrs = target.attributes;
