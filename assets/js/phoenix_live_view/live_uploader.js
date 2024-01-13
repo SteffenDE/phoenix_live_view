@@ -68,8 +68,10 @@ export default class LiveUploader {
   }
 
   static trackFiles(inputEl, files, dataTransfer){
+    console.log("TRACKK", files);
     if(inputEl.getAttribute("multiple") !== null){
       let newFiles = files.filter(file => !this.activeFiles(inputEl).find(f => Object.is(f, file)))
+      console.log("newfiles", newFiles)
       DOM.putPrivate(inputEl, "files", this.activeFiles(inputEl).concat(newFiles))
       inputEl.value = null
     } else {
@@ -94,7 +96,11 @@ export default class LiveUploader {
   }
 
   static filesAwaitingPreflight(input){
-    return this.activeFiles(input).filter(f => !UploadEntry.isPreflighted(input, f))
+    return this.activeFiles(input).filter(f => !UploadEntry.isPreflighted(input, f) && !UploadEntry.isPreflightInProgress(f))
+  }
+
+  static markPreflightInProgress(entries){
+    entries.forEach(entry => UploadEntry.markPreflightInProgress(entry.file))
   }
 
   constructor(inputEl, view, onComplete){
@@ -103,6 +109,9 @@ export default class LiveUploader {
     this._entries =
       Array.from(LiveUploader.filesAwaitingPreflight(inputEl) || [])
         .map(file => new UploadEntry(inputEl, file, view))
+
+    // prevent sending duplicate preflight requests 
+    LiveUploader.markPreflightInProgress(this._entries)
 
     this.numEntriesInProgress = this._entries.length
   }
