@@ -614,7 +614,12 @@ var LiveView = (() => {
       return this.isPhxChild(el) ? el : this.all(el, `[${PHX_PARENT_ID}]`)[0];
     },
     dispatchEvent(target, name, opts = {}) {
-      let bubbles = opts.bubbles === void 0 ? true : !!opts.bubbles;
+      let defaultBubble = true;
+      let isUploadTarget = target.nodeName === "INPUT" && target.type === "file";
+      if (isUploadTarget && name === "click") {
+        defaultBubble = false;
+      }
+      let bubbles = opts.bubbles === void 0 ? defaultBubble : !!opts.bubbles;
       let eventOpts = { bubbles, cancelable: true, detail: opts.detail || {} };
       let event = name === "click" ? new MouseEvent("click", eventOpts) : new CustomEvent(name, eventOpts);
       target.dispatchEvent(event);
@@ -792,14 +797,21 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
   var UploadEntry = class {
     static isActive(fileEl, file) {
       let isNew = file._phxRef === void 0;
+      let isPreflightInProgress = UploadEntry.isPreflightInProgress(file) === true;
       let activeRefs = fileEl.getAttribute(PHX_ACTIVE_ENTRY_REFS).split(",");
       let isActive = activeRefs.indexOf(LiveUploader.genFileRef(file)) >= 0;
-      return file.size > 0 && (isNew || isActive);
+      return file.size > 0 && (isNew || isActive || !isPreflightInProgress);
     }
     static isPreflighted(fileEl, file) {
       let preflightedRefs = fileEl.getAttribute(PHX_PREFLIGHTED_REFS).split(",");
       let isPreflighted = preflightedRefs.indexOf(LiveUploader.genFileRef(file)) >= 0;
       return isPreflighted && this.isActive(fileEl, file);
+    }
+    static isPreflightInProgress(file) {
+      return file._preflightInProgress === true;
+    }
+    static markPreflightInProgress(file) {
+      file._preflightInProgress = true;
     }
     constructor(fileEl, file, view) {
       this.ref = LiveUploader.genFileRef(file);
@@ -944,8 +956,10 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       dom_default.putPrivate(inputEl, "files", dom_default.private(inputEl, "files").filter((f) => !Object.is(f, file)));
     }
     static trackFiles(inputEl, files, dataTransfer) {
+      console.log("TRACKK", files);
       if (inputEl.getAttribute("multiple") !== null) {
         let newFiles = files.filter((file) => !this.activeFiles(inputEl).find((f) => Object.is(f, file)));
+        console.log("newfiles", newFiles);
         dom_default.putPrivate(inputEl, "files", this.activeFiles(inputEl).concat(newFiles));
         inputEl.value = null;
       } else {
@@ -967,12 +981,16 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       return Array.from(fileInputs).filter((input) => this.filesAwaitingPreflight(input).length > 0);
     }
     static filesAwaitingPreflight(input) {
-      return this.activeFiles(input).filter((f) => !UploadEntry.isPreflighted(input, f));
+      return this.activeFiles(input).filter((f) => !UploadEntry.isPreflighted(input, f) && !UploadEntry.isPreflightInProgress(f));
+    }
+    static markPreflightInProgress(entries) {
+      entries.forEach((entry) => UploadEntry.markPreflightInProgress(entry.file));
     }
     constructor(inputEl, view, onComplete) {
       this.view = view;
       this.onComplete = onComplete;
       this._entries = Array.from(LiveUploader.filesAwaitingPreflight(inputEl) || []).map((file) => new UploadEntry(inputEl, file, view));
+      LiveUploader.markPreflightInProgress(this._entries);
       this.numEntriesInProgress = this._entries.length;
     }
     entries() {
