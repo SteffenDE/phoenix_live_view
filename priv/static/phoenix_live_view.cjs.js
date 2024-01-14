@@ -311,7 +311,9 @@ var DOM = {
     return inputEl.hasAttribute("data-phx-auto-upload");
   },
   findUploadInputs(node) {
-    return this.all(node, `input[type="file"][${PHX_UPLOAD_REF}]`);
+    const formId = node.id;
+    const inputsOutsideForm = this.all(document, `input[type="file"][${PHX_UPLOAD_REF}][form="${formId}"]`);
+    return this.all(node, `input[type="file"][${PHX_UPLOAD_REF}]`).concat(inputsOutsideForm);
   },
   findComponentNodeList(node, cid) {
     return this.filterWithinSameLiveView(this.all(node, `[${PHX_COMPONENT}="${cid}"]`), node);
@@ -585,7 +587,12 @@ var DOM = {
     return this.isPhxChild(el) ? el : this.all(el, `[${PHX_PARENT_ID}]`)[0];
   },
   dispatchEvent(target, name, opts = {}) {
-    let bubbles = opts.bubbles === void 0 ? true : !!opts.bubbles;
+    let defaultBubble = true;
+    let isUploadTarget = target.nodeName === "INPUT" && target.type === "file";
+    if (isUploadTarget) {
+      defaultBubble = false;
+    }
+    let bubbles = opts.bubbles === void 0 ? defaultBubble : !!opts.bubbles;
     let eventOpts = { bubbles, cancelable: true, detail: opts.detail || {} };
     let event = name === "click" ? new MouseEvent("click", eventOpts) : new CustomEvent(name, eventOpts);
     target.dispatchEvent(event);
