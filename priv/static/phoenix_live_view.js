@@ -614,7 +614,12 @@ var LiveView = (() => {
       return this.isPhxChild(el) ? el : this.all(el, `[${PHX_PARENT_ID}]`)[0];
     },
     dispatchEvent(target, name, opts = {}) {
-      let bubbles = opts.bubbles === void 0 ? true : !!opts.bubbles;
+      let defaultBubble = true;
+      let isUploadTarget = target.nodeName === "INPUT" && target.type === "file";
+      if (isUploadTarget) {
+        defaultBubble = false;
+      }
+      let bubbles = opts.bubbles === void 0 ? defaultBubble : !!opts.bubbles;
       let eventOpts = { bubbles, cancelable: true, detail: opts.detail || {} };
       let event = name === "click" ? new MouseEvent("click", eventOpts) : new CustomEvent(name, eventOpts);
       target.dispatchEvent(event);
@@ -3430,10 +3435,11 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       }
       dom_default.all(document, `[${PHX_REF_SRC}="${this.id}"][${PHX_REF}="${ref}"]`, (el) => {
         let disabledVal = el.getAttribute(PHX_DISABLED);
+        let readOnlyVal = el.getAttribute(PHX_READONLY);
         el.removeAttribute(PHX_REF);
         el.removeAttribute(PHX_REF_SRC);
-        if (el.getAttribute(PHX_READONLY) !== null) {
-          el.readOnly = false;
+        if (readOnlyVal !== null) {
+          el.readOnly = readOnlyVal === "true" ? true : false;
           el.removeAttribute(PHX_READONLY);
         }
         if (disabledVal !== null) {
@@ -3475,7 +3481,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
           if (disableText !== "") {
             el.innerText = disableText;
           }
-          el.setAttribute(PHX_DISABLED, el.disabled);
+          el.setAttribute(PHX_DISABLED, el.getAttribute(PHX_DISABLED) || el.disabled);
           el.setAttribute("disabled", "");
         }
       });
