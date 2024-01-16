@@ -1087,23 +1087,50 @@ var Hooks = {
     }
   }
 };
-var scrollTop = () => document.documentElement.scrollTop || document.body.scrollTop;
-var winHeight = () => window.innerHeight || document.documentElement.clientHeight;
-var isAtViewportTop = (el) => {
-  let rect = el.getBoundingClientRect();
-  return rect.top >= 0 && rect.left >= 0 && rect.top <= winHeight();
+var findScrollContainer = (el) => {
+  if (["scroll", "auto"].indexOf(getComputedStyle(el).overflowY) >= 0)
+    return el;
+  if (document.documentElement === el)
+    return null;
+  return findScrollContainer(el.parentElement);
 };
-var isAtViewportBottom = (el) => {
-  let rect = el.getBoundingClientRect();
-  return rect.right >= 0 && rect.left >= 0 && rect.bottom <= winHeight();
+var scrollTop = (scrollContainer) => {
+  if (scrollContainer) {
+    return scrollContainer.scrollTop;
+  } else {
+    return document.documentElement.scrollTop || document.body.scrollTop;
+  }
 };
-var isWithinViewport = (el) => {
+var bottom = (scrollContainer) => {
+  if (scrollContainer) {
+    return scrollContainer.getBoundingClientRect().bottom;
+  } else {
+    return window.innerHeight || document.documentElement.clientHeight;
+  }
+};
+var top = (scrollContainer) => {
+  if (scrollContainer) {
+    return scrollContainer.getBoundingClientRect().top;
+  } else {
+    return 0;
+  }
+};
+var isAtViewportTop = (el, scrollContainer) => {
   let rect = el.getBoundingClientRect();
-  return rect.top >= 0 && rect.left >= 0 && rect.top <= winHeight();
+  return rect.top >= top(scrollContainer) && rect.left >= 0 && rect.top <= bottom(scrollContainer);
+};
+var isAtViewportBottom = (el, scrollContainer) => {
+  let rect = el.getBoundingClientRect();
+  return rect.right >= top(scrollContainer) && rect.left >= 0 && rect.bottom <= bottom(scrollContainer);
+};
+var isWithinViewport = (el, scrollContainer) => {
+  let rect = el.getBoundingClientRect();
+  return rect.top >= top(scrollContainer) && rect.left >= 0 && rect.top <= bottom(scrollContainer);
 };
 Hooks.InfiniteScroll = {
   mounted() {
-    let scrollBefore = scrollTop();
+    this.scrollContainer = findScrollContainer(this.el);
+    let scrollBefore = scrollTop(this.scrollContainer);
     let topOverran = false;
     let throttleInterval = 500;
     let pendingOp = null;
@@ -1117,22 +1144,26 @@ Hooks.InfiniteScroll = {
       pendingOp = () => firstChild.scrollIntoView({ block: "start" });
       this.liveSocket.execJSHookPush(this.el, topEvent, { id: firstChild.id }, () => {
         pendingOp = null;
-        if (!isWithinViewport(firstChild)) {
-          firstChild.scrollIntoView({ block: "start" });
-        }
+        window.requestAnimationFrame(() => {
+          if (!isWithinViewport(firstChild, this.scrollContainer)) {
+            firstChild.scrollIntoView({ block: "start" });
+          }
+        });
       });
     });
     let onLastChildAtBottom = this.throttle(throttleInterval, (bottomEvent, lastChild) => {
       pendingOp = () => lastChild.scrollIntoView({ block: "end" });
       this.liveSocket.execJSHookPush(this.el, bottomEvent, { id: lastChild.id }, () => {
         pendingOp = null;
-        if (!isWithinViewport(lastChild)) {
-          lastChild.scrollIntoView({ block: "end" });
-        }
+        window.requestAnimationFrame(() => {
+          if (!isWithinViewport(lastChild, this.scrollContainer)) {
+            lastChild.scrollIntoView({ block: "end" });
+          }
+        });
       });
     });
-    this.onScroll = (e) => {
-      let scrollNow = scrollTop();
+    this.onScroll = (_e) => {
+      let scrollNow = scrollTop(this.scrollContainer);
       if (pendingOp) {
         scrollBefore = scrollNow;
         return pendingOp();
@@ -1150,17 +1181,25 @@ Hooks.InfiniteScroll = {
       } else if (isScrollingDown && topOverran && rect.top <= 0) {
         topOverran = false;
       }
-      if (topEvent && isScrollingUp && isAtViewportTop(firstChild)) {
+      if (topEvent && isScrollingUp && isAtViewportTop(firstChild, this.scrollContainer)) {
         onFirstChildAtTop(topEvent, firstChild);
-      } else if (bottomEvent && isScrollingDown && isAtViewportBottom(lastChild)) {
+      } else if (bottomEvent && isScrollingDown && isAtViewportBottom(lastChild, this.scrollContainer)) {
         onLastChildAtBottom(bottomEvent, lastChild);
       }
       scrollBefore = scrollNow;
     };
-    window.addEventListener("scroll", this.onScroll);
+    if (this.scrollContainer) {
+      this.scrollContainer.addEventListener("scroll", this.onScroll);
+    } else {
+      window.addEventListener("scroll", this.onScroll);
+    }
   },
   destroyed() {
-    window.removeEventListener("scroll", this.onScroll);
+    if (this.scrollContainer) {
+      this.scrollContainer.removeEventListener("scroll", this.onScroll);
+    } else {
+      window.removeEventListener("scroll", this.onScroll);
+    }
   },
   throttle(interval, callback) {
     let lastCallAt = 0;
@@ -4376,7 +4415,7 @@ var LiveSocket = class {
     let phxClickAway = this.binding("click-away");
     dom_default.all(document, `[${phxClickAway}]`, (el) => {
       if (!(el.isSameNode(clickStartedAt) || el.contains(clickStartedAt))) {
-        this.withinOwners(e.target, (view) => {
+        this.withinOwners(el, (view) => {
           let phxEvent = el.getAttribute(phxClickAway);
           if (js_default.isVisible(el) && js_default.isInViewport(el)) {
             js_default.exec("click", phxEvent, view, el, ["push", { data: this.eventMeta("click", e, e.target) }]);
