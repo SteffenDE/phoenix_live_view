@@ -1810,7 +1810,6 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
     }
     markPrunableContentForRemoval() {
       let phxUpdate = this.liveSocket.binding(PHX_UPDATE);
-      dom_default.all(this.container, `[${phxUpdate}=${PHX_STREAM}]`, (el) => el.innerHTML = "");
       dom_default.all(this.container, `[${phxUpdate}=append] > *, [${phxUpdate}=prepend] > *`, (el) => {
         el.setAttribute(PHX_PRUNE, "");
       });
@@ -1855,6 +1854,15 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
             }
           });
         });
+        if (isJoinPatch) {
+          dom_default.all(this.container, `[${phxUpdate}=${PHX_STREAM}]`, (el) => {
+            Array.from(el.children).forEach((child) => {
+              if (!this.streamInserts[child.id]) {
+                this.removeStreamChildElement(child);
+              }
+            });
+          });
+        }
         morphdom_esm_default(targetContainer, html, {
           childrenOnly: targetContainer.getAttribute(PHX_COMPONENT) === null,
           getNodeKey: (node) => {
@@ -4418,7 +4426,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       let phxClickAway = this.binding("click-away");
       dom_default.all(document, `[${phxClickAway}]`, (el) => {
         if (!(el.isSameNode(clickStartedAt) || el.contains(clickStartedAt))) {
-          this.withinOwners(e.target, (view) => {
+          this.withinOwners(el, (view) => {
             let phxEvent = el.getAttribute(phxClickAway);
             if (js_default.isVisible(el) && js_default.isInViewport(el)) {
               js_default.exec("click", phxEvent, view, el, ["push", { data: this.eventMeta("click", e, e.target) }]);
