@@ -2946,6 +2946,7 @@ var View = class {
       if (phxStatic) {
         toEl.setAttribute(PHX_STATIC, phxStatic);
       }
+      fromEl.setAttribute(PHX_ROOT_ID, this.root.id);
       return this.joinChild(toEl);
     });
     if (newChildren.length === 0) {
@@ -4376,7 +4377,7 @@ var LiveSocket = class {
     let phxClickAway = this.binding("click-away");
     dom_default.all(document, `[${phxClickAway}]`, (el) => {
       if (!(el.isSameNode(clickStartedAt) || el.contains(clickStartedAt))) {
-        this.withinOwners(e.target, (view) => {
+        this.withinOwners(el, (view) => {
           let phxEvent = el.getAttribute(phxClickAway);
           if (js_default.isVisible(el) && js_default.isInViewport(el)) {
             js_default.exec("click", phxEvent, view, el, ["push", { data: this.eventMeta("click", e, e.target) }]);
