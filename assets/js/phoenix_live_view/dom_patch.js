@@ -146,7 +146,7 @@ export default class DOMPatch {
           let {ref, streamAt, limit} = this.getStreamInsert(child)
           if(ref === undefined){ return parent.appendChild(child) }
 
-          DOM.putSticky(child, PHX_STREAM_REF, el => el.setAttribute(PHX_STREAM_REF, ref))
+          this.setStreamRef(child, ref)
 
           // streaming
           if(streamAt === 0){
@@ -351,12 +351,21 @@ export default class DOMPatch {
     return insert || {}
   }
 
-  maybeReOrderStream(el, isNew){
-    let {ref, streamAt, limit} = this.getStreamInsert(el)
-    if(streamAt === undefined || (streamAt === 0 && !isNew)){ return }
-
-    // we need to the PHX_STREAM_REF here as well as addChild is invoked only for parents
+  setStreamRef(el, ref) {
     DOM.putSticky(el, PHX_STREAM_REF, el => el.setAttribute(PHX_STREAM_REF, ref))
+  }
+
+  maybeReOrderStream(el, isNew){
+    let {ref, streamAt, reset} = this.getStreamInsert(el)
+    if(streamAt === undefined){ return }
+    
+    // we need to set the PHX_STREAM_REF here as well as addChild is invoked only for parents
+    this.setStreamRef(el, ref)
+    
+    if(!reset && !isNew){
+      // we only reorder if the element is new or it's a stream reset
+      return
+    }
 
     if(streamAt === 0){
       el.parentElement.insertBefore(el, el.parentElement.firstElementChild)
