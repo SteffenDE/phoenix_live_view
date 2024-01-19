@@ -35,6 +35,8 @@ import {
   PUSH_TIMEOUT,
   PHX_VIEWPORT_TOP,
   PHX_VIEWPORT_BOTTOM,
+  COMPONENTS,
+  STATIC,
 } from "./constants"
 
 import {
@@ -1161,12 +1163,28 @@ export default class View {
     )
   }
 
+  setNewRender(rendered) {
+    if (!rendered || typeof rendered !== "object") return
+    let { [STATIC]: statics } = rendered;
+
+    rendered.newRender = true
+    delete rendered.magicId
+
+    for(let i = 1; i < statics.length; i++){
+      this.setNewRender(rendered[i - 1])
+    }
+  }
+
   maybePushComponentsDestroyed(destroyedCIDs){
     let willDestroyCIDs = destroyedCIDs.filter(cid => {
       return DOM.findComponentNodeList(this.el, cid).length === 0
     })
     if(willDestroyCIDs.length > 0){
       this.pruningCIDs.push(...willDestroyCIDs)
+
+      this.pruningCIDs.forEach((cid) => {
+        this.setNewRender(this.rendered.rendered[COMPONENTS][cid])
+      })
 
       this.pushWithReply(null, "cids_will_destroy", {cids: willDestroyCIDs}, () => {
         // The cids are either back on the page or they will be fully removed,
