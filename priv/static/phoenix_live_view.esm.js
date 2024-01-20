@@ -2302,7 +2302,9 @@ var Rendered = class {
     return diff[COMPONENTS][cid];
   }
   resetRender(cid) {
-    this.rendered[COMPONENTS][cid].reset = true;
+    if (this.rendered[COMPONENTS][cid]) {
+      this.rendered[COMPONENTS][cid].reset = true;
+    }
   }
   mergeDiff(diff) {
     let newc = diff[COMPONENTS];
