@@ -458,8 +458,8 @@ defmodule Phoenix.LiveViewTest.DOM do
                 not appended? && parent_id && parent_id != container_id ->
                   acc
 
-                # do not append existing child if already present, only update in place
-                old_index && insert_at == -1 && (existing? or appended?) ->
+                # do not move existing child if already present, except if it was also deleted (refs #3021)
+                old_index && insert_at && existing? ->
                   if deleted? do
                     acc |> List.delete_at(old_index) |> List.insert_at(insert_at, child)
                   else
