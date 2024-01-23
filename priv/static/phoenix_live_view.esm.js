@@ -3044,7 +3044,9 @@ var View = class {
       if (phxStatic) {
         toEl.setAttribute(PHX_STATIC, phxStatic);
       }
-      fromEl.setAttribute(PHX_ROOT_ID, this.root.id);
+      if (fromEl) {
+        fromEl.setAttribute(PHX_ROOT_ID, this.root.id);
+      }
       return this.joinChild(toEl);
     });
     if (newChildren.length === 0) {
