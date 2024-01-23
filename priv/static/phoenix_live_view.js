@@ -1713,7 +1713,6 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
                             removeNode(curFromNodeChild, fromEl, true);
                           }
                           curFromNodeChild = matchingFromEl;
-                          curFromNodeKey = getNodeKey(curFromNodeChild);
                         }
                       } else {
                         isCompatible = false;
@@ -2344,7 +2343,9 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       return diff[COMPONENTS][cid];
     }
     resetRender(cid) {
-      this.rendered[COMPONENTS][cid].reset = true;
+      if (this.rendered[COMPONENTS][cid]) {
+        this.rendered[COMPONENTS][cid].reset = true;
+      }
     }
     mergeDiff(diff) {
       let newc = diff[COMPONENTS];
@@ -3067,7 +3068,9 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
         if (phxStatic) {
           toEl.setAttribute(PHX_STATIC, phxStatic);
         }
-        fromEl.setAttribute(PHX_ROOT_ID, this.root.id);
+        if (fromEl) {
+          fromEl.setAttribute(PHX_ROOT_ID, this.root.id);
+        }
         return this.joinChild(toEl);
       });
       if (newChildren.length === 0) {
@@ -4473,6 +4476,8 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
         if (capture) {
           target = e.target.matches(`[${click}]`) ? e.target : e.target.querySelector(`[${click}]`);
         } else {
+          if (e.detail === 0)
+            this.clickStartedAtTarget = e.target;
           let clickStartedAtTarget = this.clickStartedAtTarget || e.target;
           target = closestPhxBinding(clickStartedAtTarget, click);
           this.dispatchClickAway(e, clickStartedAtTarget);
