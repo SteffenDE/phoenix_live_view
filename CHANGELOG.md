@@ -21,6 +21,7 @@
   * Add `validate_attrs` to slots
   * Support `phx-viewport` bindings in scrollable containers
   * Perform client redirect when trying to live nav from dead client to avoid extra round trip
+  * Add `navigation` option to `LiveSocket` with `beforeEach` and `afterEach` callbacks to intercept live navigation
 
 ## 0.20.3 (2024-01-02)
 
