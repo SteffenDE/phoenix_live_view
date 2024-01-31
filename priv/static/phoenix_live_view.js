@@ -668,6 +668,10 @@ var LiveView = (() => {
           if (target.getAttribute(name) !== sourceValue && (!isIgnored || isIgnored && name.startsWith("data-"))) {
             target.setAttribute(name, sourceValue);
           }
+        } else {
+          if (name === "value" && target.value === source.value) {
+            target.setAttribute("value", source.getAttribute(name));
+          }
         }
       }
       let targetAttrs = target.attributes;
@@ -1951,7 +1955,14 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
             if (ref === void 0) {
               return parent.appendChild(child);
             }
-            dom_default.putSticky(child, PHX_STREAM_REF, (el) => el.setAttribute(PHX_STREAM_REF, ref));
+            this.setStreamRef(child, ref);
+            if (child.getAttribute(PHX_COMPONENT)) {
+              if (child.getAttribute(PHX_SKIP) !== null) {
+                child = this.streamComponentRestore[child.id];
+              } else {
+                delete this.streamComponentRestore[child.id];
+              }
+            }
             if (child.getAttribute(PHX_COMPONENT)) {
               if (child.getAttribute(PHX_SKIP) !== null) {
                 child = this.streamComponentRestore[child.id];
@@ -2130,12 +2141,18 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       let insert = el.id ? this.streamInserts[el.id] : {};
       return insert || {};
     }
+    setStreamRef(el, ref) {
+      dom_default.putSticky(el, PHX_STREAM_REF, (el2) => el2.setAttribute(PHX_STREAM_REF, ref));
+    }
     maybeReOrderStream(el, isNew) {
-      let { ref, streamAt } = this.getStreamInsert(el);
-      if (streamAt === void 0 || streamAt === 0 && !isNew) {
+      let { ref, streamAt, reset } = this.getStreamInsert(el);
+      if (streamAt === void 0) {
         return;
       }
-      dom_default.putSticky(el, PHX_STREAM_REF, (el2) => el2.setAttribute(PHX_STREAM_REF, ref));
+      this.setStreamRef(el, ref);
+      if (!reset && !isNew) {
+        return;
+      }
       if (streamAt === 0) {
         el.parentElement.insertBefore(el, el.parentElement.firstElementChild);
       } else if (streamAt > 0) {
@@ -2613,6 +2630,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
 
   // js/phoenix_live_view/js.js
   var focusStack = null;
+  var default_transition_time = 200;
   var JS = {
     exec(eventType, phxEvent, view, sourceEl, defaults) {
       let [defaultKind, defaultArgs] = defaults || [null, { callback: defaults && defaults.callback }];
@@ -2634,7 +2652,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       const rect = el.getBoundingClientRect();
       return rect.top >= 0 && rect.left >= 0 && rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && rect.right <= (window.innerWidth || document.documentElement.clientWidth);
     },
-    exec_exec(eventType, phxEvent, view, sourceEl, el, [attr, to]) {
+    exec_exec(eventType, phxEvent, view, sourceEl, el, { attr, to }) {
       let nodes = to ? dom_default.all(document, to) : [sourceEl];
       nodes.forEach((node) => {
         let encodedJS = node.getAttribute(attr);
@@ -2749,6 +2767,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       }
     },
     toggle(eventType, view, el, display, ins, outs, time) {
+      time = time || default_transition_time;
       let [inClasses, inStartClasses, inEndClasses] = ins || [[], [], []];
       let [outClasses, outStartClasses, outEndClasses] = outs || [[], [], []];
       if (inClasses.length > 0 || outClasses.length > 0) {
@@ -2811,6 +2830,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       });
     },
     addOrRemoveClasses(el, adds, removes, transition, time, view) {
+      time = time || default_transition_time;
       let [transitionRun, transitionStart, transitionEnd] = transition || [[], [], []];
       if (transitionRun.length > 0) {
         let onStart = () => {
@@ -2876,8 +2896,9 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
     let params = new URLSearchParams();
     Array.from(form.elements).forEach((el) => {
       if (el.name && onlyNames.length === 0 || onlyNames.indexOf(el.name) >= 0) {
-        if (el.name && formData.getAll(el.name).indexOf(el.value) >= 0 || submitter === el) {
-          params.append(el.name, el.value);
+        const values = formData.getAll(el.name);
+        if (el.name && values.indexOf(el.value) >= 0 || submitter === el) {
+          values.forEach((val) => params.append(el.name, val));
         }
       }
     });
@@ -4014,6 +4035,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       this.sessionStorage = opts.sessionStorage || window.sessionStorage;
       this.boundTopLevelEvents = false;
       this.domCallbacks = Object.assign({ onNodeAdded: closure(), onBeforeElUpdated: closure() }, opts.dom || {});
+      this.navigationCallbacks = Object.assign({ beforeEach: closure(), afterEach: closure() }, opts.navigation || {});
       this.transitions = new TransitionSet();
       window.addEventListener("pagehide", (_e) => {
         this.unloaded = true;
@@ -4267,7 +4289,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
             dom_default.findPhxSticky(document).forEach((el) => newMainEl.appendChild(el));
             this.outgoingMainEl.replaceWith(newMainEl);
             this.outgoingMainEl = null;
-            callback && requestAnimationFrame(() => callback(linkRef));
+            callback && callback(linkRef);
             onDone();
           });
         }
@@ -4509,7 +4531,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
           }
           return;
         }
-        if (target.getAttribute("href") === "#" || target.form) {
+        if (target.getAttribute("href") === "#") {
           e.preventDefault();
         }
         if (target.hasAttribute(PHX_REF)) {
@@ -4550,25 +4572,33 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
         }, 100);
       });
       window.addEventListener("popstate", (event) => {
+        const previousLocation = clone(this.currentLocation);
         if (!this.registerNewLocation(window.location)) {
           return;
         }
-        let { type, id, root, scroll } = event.state || {};
-        let href = window.location.href;
-        dom_default.dispatchEvent(window, "phx:navigate", { detail: { href, patch: type === "patch", pop: true } });
-        this.requestDOMUpdate(() => {
-          if (this.main.isConnected() && (type === "patch" && id === this.main.id)) {
-            this.main.pushLinkPatch(href, null, () => {
-              this.maybeScroll(scroll);
-            });
-          } else {
-            this.replaceMain(href, null, () => {
-              if (root) {
-                this.replaceRootHistory();
-              }
-              this.maybeScroll(scroll);
-            });
-          }
+        this.withNavigationGuard(window.location.href, previousLocation.href, () => {
+          let { type, id, root, scroll } = event.state || {};
+          let href = window.location.href;
+          dom_default.dispatchEvent(window, "phx:navigate", { detail: { href, patch: type === "patch", pop: true } });
+          this.requestDOMUpdate(() => {
+            if (this.main.isConnected() && (type === "patch" && id === this.main.id)) {
+              this.main.pushLinkPatch(href, null, () => {
+                this.maybeScroll(scroll);
+                this.afterNavigation(href, previousLocation.href);
+              });
+            } else {
+              this.replaceMain(href, null, () => {
+                if (root) {
+                  this.replaceRootHistory();
+                }
+                this.maybeScroll(scroll);
+                this.afterNavigation(href, previousLocation.href);
+              });
+            }
+          });
+        }, () => {
+          browser_default.pushState("push", history.state || {}, previousLocation.href);
+          this.registerNewLocation(previousLocation);
         });
       }, false);
       window.addEventListener("click", (e) => {
@@ -4618,13 +4648,15 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       return callback ? callback(done) : done;
     }
     pushHistoryPatch(href, linkState, targetEl) {
-      if (!this.isConnected() || !this.main.isMain()) {
-        return browser_default.redirect(href);
-      }
-      this.withPageLoading({ to: href, kind: "patch" }, (done) => {
-        this.main.pushLinkPatch(href, targetEl, (linkRef) => {
-          this.historyPatch(href, linkState, linkRef);
-          done();
+      this.withNavigationGuard(href, this.currentLocation.href, () => {
+        if (!this.isConnected() || !this.main.isMain()) {
+          return browser_default.redirect(href);
+        }
+        this.withPageLoading({ to: href, kind: "patch" }, (done) => {
+          this.main.pushLinkPatch(href, targetEl, (linkRef) => {
+            this.historyPatch(href, linkState, linkRef);
+            done();
+          });
         });
       });
     }
@@ -4634,25 +4666,31 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       }
       browser_default.pushState(linkState, { type: "patch", id: this.main.id }, href);
       dom_default.dispatchEvent(window, "phx:navigate", { detail: { patch: true, href, pop: false } });
+      const previousLocation = clone(this.currentLocation);
       this.registerNewLocation(window.location);
+      this.afterNavigation(window.location.href, previousLocation.href);
     }
     historyRedirect(href, linkState, flash) {
-      if (!this.isConnected() || !this.main.isMain()) {
-        return browser_default.redirect(href, flash);
-      }
-      if (/^\/$|^\/[^\/]+.*$/.test(href)) {
-        let { protocol, host } = window.location;
-        href = `${protocol}//${host}${href}`;
-      }
-      let scroll = window.scrollY;
-      this.withPageLoading({ to: href, kind: "redirect" }, (done) => {
-        this.replaceMain(href, flash, (linkRef) => {
-          if (linkRef === this.linkRef) {
-            browser_default.pushState(linkState, { type: "redirect", id: this.main.id, scroll }, href);
-            dom_default.dispatchEvent(window, "phx:navigate", { detail: { href, patch: false, pop: false } });
-            this.registerNewLocation(window.location);
-          }
-          done();
+      this.withNavigationGuard(href, this.currentLocation.href, () => {
+        if (!this.isConnected() || !this.main.isMain()) {
+          return browser_default.redirect(href, flash);
+        }
+        if (/^\/$|^\/[^\/]+.*$/.test(href)) {
+          let { protocol, host } = window.location;
+          href = `${protocol}//${host}${href}`;
+        }
+        let scroll = window.scrollY;
+        this.withPageLoading({ to: href, kind: "redirect" }, (done) => {
+          this.replaceMain(href, flash, (linkRef) => {
+            if (linkRef === this.linkRef) {
+              browser_default.pushState(linkState, { type: "redirect", id: this.main.id, scroll }, href);
+              dom_default.dispatchEvent(window, "phx:navigate", { detail: { href, patch: false, pop: false } });
+              const previousLocation = clone(this.currentLocation);
+              this.registerNewLocation(window.location);
+              this.afterNavigation(window.location.href, previousLocation.href);
+            }
+            done();
+          });
         });
       });
     }
@@ -4667,6 +4705,20 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
         this.currentLocation = clone(newLocation);
         return true;
       }
+    }
+    withNavigationGuard(to, from, callback, cancel = function() {
+    }) {
+      const guardResult = this.navigationCallbacks["beforeEach"](to, from);
+      Promise.resolve(guardResult).then((result) => {
+        if (result === false) {
+          cancel();
+        } else {
+          callback();
+        }
+      });
+    }
+    afterNavigation(to, from) {
+      this.navigationCallbacks["afterEach"](to, from);
     }
     bindForms() {
       let iterations = 0;
