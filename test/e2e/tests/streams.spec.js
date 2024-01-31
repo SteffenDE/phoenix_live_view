@@ -329,6 +329,8 @@ test("any stream insert for elements already in the DOM does not reorder", async
 });
 
 test.describe("stream limit - issue #2686", () => {
+  const listItems = async (page) => page.locator("ul > li").evaluateAll(list => list.map(el => el.id));
+
   test("limit is enforced on mount, but not dead render", async ({ page, request }) => {
     const html = await (request.get("/stream/limit").then(r => r.text()));
     for (let i = 1; i <= 10; i++) {

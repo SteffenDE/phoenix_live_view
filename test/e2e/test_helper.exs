@@ -31,6 +31,7 @@ defmodule Phoenix.LiveViewTest.E2E.Layout do
     <script>
       let liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket)
       liveSocket.connect()
+      window.liveSocket = liveSocket
     </script>
     <style>
       * { font-size: 1.1em; }
@@ -70,6 +71,14 @@ defmodule Phoenix.LiveViewTest.E2E.Router do
       live "/3040", Phoenix.LiveViewTest.E2E.Issue3040Live
     end
   end
+
+  # these routes use a custom layout and therefore cannot be in the live_session
+  scope "/issues" do
+    pipe_through(:browser)
+
+    live "/3047/a", Phoenix.LiveViewTest.E2E.Issue3047ALive
+    live "/3047/b", Phoenix.LiveViewTest.E2E.Issue3047BLive
+  end
 end
 
 defmodule Phoenix.LiveViewTest.E2E.Endpoint do
@@ -82,6 +91,11 @@ defmodule Phoenix.LiveViewTest.E2E.Endpoint do
   plug Plug.Static, from: System.tmp_dir!(), at: "/tmp"
 
   plug :health_check
+
+  plug Plug.Parsers,
+    parsers: [:urlencoded, :multipart, :json],
+    pass: ["*/*"],
+    json_decoder: Phoenix.json_library()
 
   plug Phoenix.LiveViewTest.E2E.Router
 

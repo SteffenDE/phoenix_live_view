@@ -636,7 +636,7 @@ var DOM = {
       let name = sourceAttrs[i].name;
       if (!exclude.has(name)) {
         const sourceValue = source.getAttribute(name);
-        if (target.getAttribute(name) !== sourceValue) {
+        if (target.getAttribute(name) !== sourceValue && (!isIgnored || isIgnored && name.startsWith("data-"))) {
           target.setAttribute(name, sourceValue);
         }
       }
@@ -1686,6 +1686,7 @@ function morphdomFactory(morphAttrs2) {
                           removeNode(curFromNodeChild, fromEl, true);
                         }
                         curFromNodeChild = matchingFromEl;
+                        curFromNodeKey = getNodeKey(curFromNodeChild);
                       }
                     } else {
                       isCompatible = false;
@@ -1893,8 +1894,12 @@ var DOMPatch = class {
       });
       if (isJoinPatch) {
         dom_default.all(this.container, `[${phxUpdate}=${PHX_STREAM}]`, (el) => {
-          Array.from(el.children).forEach((child) => {
-            this.removeStreamChildElement(child);
+          this.liveSocket.owner(el, (view2) => {
+            if (view2 === this.view) {
+              Array.from(el.children).forEach((child) => {
+                this.removeStreamChildElement(child);
+              });
+            }
           });
         });
       }
@@ -1917,7 +1922,7 @@ var DOMPatch = class {
           if (ref === void 0) {
             return parent.appendChild(child);
           }
-          this.setStreamRef(child, ref);
+          dom_default.putSticky(child, PHX_STREAM_REF, (el) => el.setAttribute(PHX_STREAM_REF, ref));
           if (child.getAttribute(PHX_COMPONENT)) {
             if (child.getAttribute(PHX_SKIP) !== null) {
               child = this.streamComponentRestore[child.id];
@@ -2096,18 +2101,12 @@ var DOMPatch = class {
     let insert = el.id ? this.streamInserts[el.id] : {};
     return insert || {};
   }
-  setStreamRef(el, ref) {
-    dom_default.putSticky(el, PHX_STREAM_REF, (el2) => el2.setAttribute(PHX_STREAM_REF, ref));
-  }
   maybeReOrderStream(el, isNew) {
-    let { ref, streamAt, reset } = this.getStreamInsert(el);
-    if (streamAt === void 0) {
+    let { ref, streamAt } = this.getStreamInsert(el);
+    if (streamAt === void 0 || streamAt === 0 && !isNew) {
       return;
     }
-    this.setStreamRef(el, ref);
-    if (!reset && !isNew) {
-      return;
-    }
+    dom_default.putSticky(el, PHX_STREAM_REF, (el2) => el2.setAttribute(PHX_STREAM_REF, ref));
     if (streamAt === 0) {
       el.parentElement.insertBefore(el, el.parentElement.firstElementChild);
     } else if (streamAt > 0) {
@@ -2448,8 +2447,8 @@ var Rendered = class {
     if (isRoot) {
       let skip = false;
       let attrs;
-      if (changeTracking || Object.keys(rootAttrs).length > 0) {
-        skip = !rendered.newRender;
+      if (changeTracking || rendered.magicId) {
+        skip = changeTracking && !rendered.newRender;
         attrs = { [PHX_MAGIC_ID]: rendered.magicId, ...rootAttrs };
       } else {
         attrs = rootAttrs;
@@ -2838,9 +2837,6 @@ var js_default = JS;
 var serializeForm = (form, metadata, onlyNames = []) => {
   let { submitter, ...meta } = metadata;
   let formData = new FormData(form);
-  if (submitter && submitter.hasAttribute("name") && submitter.form && submitter.form === form) {
-    formData.append(submitter.name, submitter.value);
-  }
   let toRemove = [];
   formData.forEach((val, key, _index) => {
     if (val instanceof File) {
@@ -2849,10 +2845,15 @@ var serializeForm = (form, metadata, onlyNames = []) => {
   });
   toRemove.forEach((key) => formData.delete(key));
   let params = new URLSearchParams();
-  for (let [key, val] of formData.entries()) {
-    if (onlyNames.length === 0 || onlyNames.indexOf(key) >= 0) {
-      params.append(key, val);
+  Array.from(form.elements).forEach((el) => {
+    if (el.name && onlyNames.length === 0 || onlyNames.indexOf(el.name) >= 0) {
+      if (el.name && formData.getAll(el.name).indexOf(el.value) >= 0 || submitter === el) {
+        params.append(el.name, el.value);
+      }
     }
+  });
+  if (submitter && submitter.name && !params.has(submitter.name)) {
+    params.append(submitter.name, submitter.value);
   }
   for (let metaKey in meta) {
     params.append(metaKey, meta[metaKey]);
@@ -2872,7 +2873,7 @@ var View = class {
     this.childJoins = 0;
     this.loaderTimer = null;
     this.pendingDiffs = [];
-    this.pruningCIDsClock = 0;
+    this.pruningCIDs = [];
     this.redirect = false;
     this.href = null;
     this.joinCount = this.parent ? this.parent.joinCount - 1 : 0;
@@ -3280,7 +3281,7 @@ var View = class {
   renderContainer(diff, kind) {
     return this.liveSocket.time(`toString diff (${kind})`, () => {
       let tag = this.el.tagName;
-      let cids = diff && this.pruningCIDsClock === 0 ? this.rendered.componentCIDs(diff) : null;
+      let cids = diff ? this.rendered.componentCIDs(diff).concat(this.pruningCIDs) : null;
       let [html, streams] = this.rendered.toString(cids);
       return [`<${tag}>${html}</${tag}>`, streams];
     });
@@ -3666,6 +3667,9 @@ var View = class {
     let refGenerator = () => this.putRef([inputEl, inputEl.form], "change", opts);
     let formData;
     let meta = this.extractMeta(inputEl.form);
+    if (inputEl instanceof HTMLButtonElement) {
+      meta.submitter = inputEl;
+    }
     if (inputEl.getAttribute(this.binding("change"))) {
       formData = serializeForm(inputEl.form, { _target: opts._target, ...meta }, [inputEl.name]);
     } else {
@@ -3899,12 +3903,11 @@ var View = class {
     }).filter(([form, newForm, newCid]) => newForm);
   }
   maybePushComponentsDestroyed(destroyedCIDs) {
-    let willDestroyCIDs = destroyedCIDs.filter((cid) => {
+    let willDestroyCIDs = destroyedCIDs.concat(this.pruningCIDs).filter((cid) => {
       return dom_default.findComponentNodeList(this.el, cid).length === 0;
     });
+    this.pruningCIDs = willDestroyCIDs.concat([]);
     if (willDestroyCIDs.length > 0) {
-      this.pruningCIDsClock++;
-      let pruningCIDsWas = this.pruningCIDsClock;
       willDestroyCIDs.forEach((cid) => this.rendered.resetRender(cid));
       this.pushWithReply(null, "cids_will_destroy", { cids: willDestroyCIDs }, () => {
         let completelyDestroyCIDs = willDestroyCIDs.filter((cid) => {
@@ -3912,9 +3915,7 @@ var View = class {
         });
         if (completelyDestroyCIDs.length > 0) {
           this.pushWithReply(null, "cids_destroyed", { cids: completelyDestroyCIDs }, (resp) => {
-            if (pruningCIDsWas === this.pruningCIDsClock) {
-              this.pruningCIDsClock = 0;
-            }
+            this.pruningCIDs = this.pruningCIDs.filter((cid) => resp.cids.indexOf(cid) === -1);
             this.rendered.pruneCIDs(resp.cids);
           });
         }
@@ -4479,7 +4480,7 @@ var LiveSocket = class {
         }
         return;
       }
-      if (target.getAttribute("href") === "#") {
+      if (target.getAttribute("href") === "#" || target.form) {
         e.preventDefault();
       }
       if (target.hasAttribute(PHX_REF)) {

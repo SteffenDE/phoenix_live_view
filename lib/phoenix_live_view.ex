@@ -1819,7 +1819,8 @@ defmodule Phoenix.LiveView do
         Enum.reduce(items, new_socket, fn item, acc -> stream_insert(acc, name, item, opts) end)
 
       %{} ->
-        config = get_in(streams, [:__configured__, name]) || opts
+        config = get_in(streams, [:__configured__, name]) || []
+        opts = Keyword.merge(opts, config)
 
         ref =
           if cid = socket.assigns[:myself] do
@@ -1828,7 +1829,7 @@ defmodule Phoenix.LiveView do
             to_string(streams.__ref__)
           end
 
-        stream = LiveStream.new(name, ref, items, config)
+        stream = LiveStream.new(name, ref, items, opts)
 
         socket
         |> Phoenix.Component.update(:streams, fn streams ->
@@ -1877,6 +1878,7 @@ defmodule Phoenix.LiveView do
   ## Options
 
     * `:supervisor` - allows you to specify a `Task.Supervisor` to supervise the task.
+    * `:reset` - remove previous results during async operation when true. Defaults to false
 
 
   ## Examples

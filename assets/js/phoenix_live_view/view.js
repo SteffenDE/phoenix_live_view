@@ -57,16 +57,7 @@ import JS from "./js"
 
 let serializeForm = (form, metadata, onlyNames = []) => {
   let {submitter, ...meta} = metadata
-
-  // TODO: Replace with `new FormData(form, submitter)` when supported by latest browsers,
-  //       and mention `formdata-submitter-polyfill` in the docs.
   let formData = new FormData(form)
-
-  // TODO: Remove when FormData constructor supports the submitter argument.
-  if(submitter && submitter.hasAttribute("name") && submitter.form && submitter.form === form){
-    formData.append(submitter.name, submitter.value)
-  }
-
   let toRemove = []
 
   formData.forEach((val, key, _index) => {
@@ -77,11 +68,24 @@ let serializeForm = (form, metadata, onlyNames = []) => {
   toRemove.forEach(key => formData.delete(key))
 
   let params = new URLSearchParams()
-  for(let [key, val] of formData.entries()){
-    if(onlyNames.length === 0 || onlyNames.indexOf(key) >= 0){
-      params.append(key, val)
+  // Go through form els in order to mirror ordered generation of formData.entries().
+  // We must traverse elements in order manually so that we append the submitter in
+  // the order that it exists in the DOM releative to other inputs. For example,
+  // for checkbox groups, the order must be maintained. Likewise for checkboxes,
+  // we can only append to params if the checkbox is checked, so we use formData.getAll()
+  // to check if the current element value exists in the form data.
+  Array.from(form.elements).forEach(el => {
+    if(el.name && onlyNames.length === 0 || onlyNames.indexOf(el.name) >= 0){
+      if((el.name && formData.getAll(el.name).indexOf(el.value) >= 0) || submitter === el){
+        params.append(el.name, el.value)
+      }
     }
+  })
+
+  if(submitter && submitter.name && !params.has(submitter.name)){
+    params.append(submitter.name, submitter.value)
   }
+
   for(let metaKey in meta){ params.append(metaKey, meta[metaKey]) }
 
   return params.toString()
@@ -100,7 +104,7 @@ export default class View {
     this.childJoins = 0
     this.loaderTimer = null
     this.pendingDiffs = []
-    this.pruningCIDsClock = 0
+    this.pruningCIDs = []
     this.redirect = false
     this.href = null
     this.joinCount = this.parent ? this.parent.joinCount - 1 : 0
@@ -540,7 +544,7 @@ export default class View {
       let tag = this.el.tagName
       // Don't skip any component in the diff nor any marked as pruned
       // (as they may have been added back)
-      let cids = diff && this.pruningCIDsClock === 0 ? this.rendered.componentCIDs(diff) : null
+      let cids = diff ? this.rendered.componentCIDs(diff).concat(this.pruningCIDs) : null
       let [html, streams] = this.rendered.toString(cids)
       return [`<${tag}>${html}</${tag}>`, streams]
     })
@@ -904,6 +908,7 @@ export default class View {
     let refGenerator = () => this.putRef([inputEl, inputEl.form], "change", opts)
     let formData
     let meta  = this.extractMeta(inputEl.form)
+    if(inputEl instanceof HTMLButtonElement){ meta.submitter = inputEl }
     if(inputEl.getAttribute(this.binding("change"))){
       formData = serializeForm(inputEl.form, {_target: opts._target, ...meta}, [inputEl.name])
     } else {
@@ -1162,13 +1167,13 @@ export default class View {
   }
 
   maybePushComponentsDestroyed(destroyedCIDs){
-    let willDestroyCIDs = destroyedCIDs.filter(cid => {
+    let willDestroyCIDs = destroyedCIDs.concat(this.pruningCIDs).filter(cid => {
       return DOM.findComponentNodeList(this.el, cid).length === 0
     })
-    if(willDestroyCIDs.length > 0){
-      this.pruningCIDsClock++
-      let pruningCIDsWas = this.pruningCIDsClock
+    // make sure this is a copy and not a reference
+    this.pruningCIDs = willDestroyCIDs.concat([])
 
+    if(willDestroyCIDs.length > 0){
       // we must reset the render change tracking for cids that
       // could be added back from the server so we don't skip them
       willDestroyCIDs.forEach(cid => this.rendered.resetRender(cid))
@@ -1182,7 +1187,7 @@ export default class View {
 
         if(completelyDestroyCIDs.length > 0){
           this.pushWithReply(null, "cids_destroyed", {cids: completelyDestroyCIDs}, (resp) => {
-            if(pruningCIDsWas === this.pruningCIDsClock){ this.pruningCIDsClock = 0 }
+            this.pruningCIDs = this.pruningCIDs.filter(cid => resp.cids.indexOf(cid) === -1)
             this.rendered.pruneCIDs(resp.cids)
           })
         }
