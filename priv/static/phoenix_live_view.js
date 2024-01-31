@@ -2884,26 +2884,32 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
 
   // js/phoenix_live_view/view.js
   var serializeForm = (form, metadata, onlyNames = []) => {
-    let _a = metadata, { submitter } = _a, meta = __objRest(_a, ["submitter"]);
-    let formData = new FormData(form);
-    let toRemove = [];
+    const _a = metadata, { submitter } = _a, meta = __objRest(_a, ["submitter"]);
+    let injectedElement;
+    if (submitter && submitter.name) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = submitter.name;
+      input.value = submitter.value;
+      submitter.parentElement.insertBefore(input, submitter);
+      injectedElement = input;
+    }
+    const formData = new FormData(form);
+    const toRemove = [];
     formData.forEach((val, key, _index) => {
       if (val instanceof File) {
         toRemove.push(key);
       }
     });
     toRemove.forEach((key) => formData.delete(key));
-    let params = new URLSearchParams();
-    Array.from(form.elements).forEach((el) => {
-      if (el.name && onlyNames.length === 0 || onlyNames.indexOf(el.name) >= 0) {
-        const values = formData.getAll(el.name);
-        if (el.name && values.indexOf(el.value) >= 0 || submitter === el) {
-          values.forEach((val) => params.append(el.name, val));
-        }
+    const params = new URLSearchParams();
+    for (let [key, val] of formData.entries()) {
+      if (onlyNames.length === 0 || onlyNames.indexOf(key) >= 0) {
+        params.append(key, val);
       }
-    });
-    if (submitter && submitter.name && !params.has(submitter.name)) {
-      params.append(submitter.name, submitter.value);
+    }
+    if (submitter && injectedElement) {
+      submitter.parentElement.removeChild(injectedElement);
     }
     for (let metaKey in meta) {
       params.append(metaKey, meta[metaKey]);
