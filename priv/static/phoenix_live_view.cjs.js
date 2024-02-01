@@ -1927,20 +1927,12 @@ var DOMPatch = class {
             return parent.appendChild(child);
           }
           this.setStreamRef(child, ref);
-          if (child.getAttribute(PHX_COMPONENT)) {
-            if (child.getAttribute(PHX_SKIP) !== null) {
-              child = this.streamComponentRestore[child.id];
-            } else {
-              delete this.streamComponentRestore[child.id];
+          child.querySelectorAll(`[${PHX_MAGIC_ID}][${PHX_SKIP}]`).forEach((el) => {
+            const component = this.streamComponentRestore[el.getAttribute(PHX_MAGIC_ID)];
+            if (component) {
+              el.replaceWith(component);
             }
-          }
-          if (child.getAttribute(PHX_COMPONENT)) {
-            if (child.getAttribute(PHX_SKIP) !== null) {
-              child = this.streamComponentRestore[child.id];
-            } else {
-              delete this.streamComponentRestore[child.id];
-            }
-          }
+          });
           if (streamAt === 0) {
             parent.insertAdjacentElement("afterbegin", child);
           } else if (streamAt === -1) {
@@ -2101,8 +2093,10 @@ var DOMPatch = class {
   }
   removeStreamChildElement(child) {
     if (!this.maybePendingRemove(child)) {
-      if (child.getAttribute(PHX_COMPONENT) && this.streamInserts[child.id]) {
-        this.streamComponentRestore[child.id] = child;
+      if (this.streamInserts[child.id]) {
+        child.querySelectorAll(`[${PHX_MAGIC_ID}]`).forEach((el) => {
+          this.streamComponentRestore[el.getAttribute(PHX_MAGIC_ID)] = el;
+        });
       }
       child.remove();
       this.onNodeDiscarded(child);
