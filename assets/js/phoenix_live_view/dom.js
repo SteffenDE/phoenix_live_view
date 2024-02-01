@@ -326,7 +326,7 @@ let DOM = {
     }
 
     if(feedbacks.length > 0){
-      let selector = feedbacks.map(f => `[${phxFeedbackFor}="${f}"]`).join(", ")
+      let selector = feedbacks.map(f => `[${phxFeedbackFor}="${CSS.escape(f)}"]`).join(", ")
       DOM.all(container, selector, el => el.classList.add(PHX_NO_FEEDBACK_CLASS))
     }
   },
