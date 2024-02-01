@@ -874,7 +874,10 @@ export default class LiveSocket {
 
   // must be called after a navigation was performed, see `withNavigationGuard`.
   afterNavigation(to, from){
-    this.navigationCallbacks["afterEach"](to, from)
+    // wait for any dom patching to finish before calling afterEach
+    window.requestAnimationFrame(() => {
+      this.navigationCallbacks["afterEach"](to, from)
+    })
   }
 
   bindForms(){
