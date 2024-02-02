@@ -544,21 +544,26 @@ var DOM = {
       el.setAttribute("data-phx-hook", "Phoenix.InfiniteScroll");
     }
   },
-  maybeHideFeedback(container, inputs, phxFeedbackFor, phxFeedbackGroup) {
+  maybeHideFeedback(container, forms, phxFeedbackFor, phxFeedbackGroup) {
     let feedbacks = [];
     let inputNamesFocused = {};
     let feedbackGroups = {};
-    inputs.forEach((input) => {
-      const group = input.getAttribute(phxFeedbackGroup);
-      if (group && !(group in feedbackGroups))
-        feedbackGroups[group] = true;
-      if (!(input.name in inputNamesFocused))
-        inputNamesFocused[input.name] = false;
-      if (this.private(input, PHX_HAS_FOCUSED) || this.private(input, PHX_HAS_SUBMITTED)) {
-        inputNamesFocused[input.name] = true;
-        if (group)
-          feedbackGroups[group] = false;
-      }
+    forms.forEach((form) => {
+      Array.from(form.elements).forEach((input) => {
+        const group = input.getAttribute(phxFeedbackGroup);
+        if (group && !(group in feedbackGroups)) {
+          feedbackGroups[group] = true;
+        }
+        if (!(input.name in inputNamesFocused)) {
+          inputNamesFocused[input.name] = false;
+        }
+        if (this.private(input, PHX_HAS_FOCUSED) || this.private(input, PHX_HAS_SUBMITTED)) {
+          inputNamesFocused[input.name] = true;
+          if (group) {
+            feedbackGroups[group] = false;
+          }
+        }
+      });
     });
     for (const [name, focused] of Object.entries(inputNamesFocused)) {
       if (!focused) {
@@ -1873,7 +1878,7 @@ var DOMPatch = class {
     let phxViewportBottom = liveSocket.binding(PHX_VIEWPORT_BOTTOM);
     let phxTriggerExternal = liveSocket.binding(PHX_TRIGGER_ACTION);
     let added = [];
-    let trackedInputs = [];
+    let trackedForms = new Set();
     let updates = [];
     let appendPrependUpdates = [];
     let externalFormTriggered = null;
@@ -1960,7 +1965,7 @@ var DOMPatch = class {
             externalFormTriggered = el;
           }
           if (el.getAttribute && el.getAttribute("name") && dom_default.isFormInput(el)) {
-            trackedInputs.push(el);
+            trackedForms.add(el.form);
           }
           if (dom_default.isPhxChild(el) && view.ownsElement(el) || dom_default.isPhxSticky(el) && view.ownsElement(el.parentNode)) {
             this.trackAfter("phxChildAdded", el);
@@ -2037,7 +2042,7 @@ var DOMPatch = class {
             dom_default.syncAttrsToProps(fromEl);
             updates.push(fromEl);
             dom_default.applyStickyOperations(fromEl);
-            trackedInputs.push(fromEl);
+            trackedForms.add(fromEl.form);
             return false;
           } else {
             if (focusedSelectChanged) {
@@ -2049,7 +2054,7 @@ var DOMPatch = class {
             dom_default.syncAttrsToProps(toEl);
             dom_default.applyStickyOperations(toEl);
             if (toEl.getAttribute("name") && dom_default.isFormInput(toEl)) {
-              trackedInputs.push(toEl);
+              trackedForms.add(toEl.form);
             }
             this.trackBefore("updated", fromEl, toEl);
             return true;
@@ -2065,7 +2070,7 @@ var DOMPatch = class {
         appendPrependUpdates.forEach((update) => update.perform());
       });
     }
-    dom_default.maybeHideFeedback(targetContainer, trackedInputs, phxFeedbackFor, phxFeedbackGroup);
+    dom_default.maybeHideFeedback(targetContainer, trackedForms, phxFeedbackFor, phxFeedbackGroup);
     liveSocket.silenceEvents(() => dom_default.restoreFocus(focused, selectionStart, selectionEnd));
     dom_default.dispatchEvent(document, "phx:update");
     added.forEach((el) => this.trackAfter("added", el));
@@ -2854,6 +2859,10 @@ var serializeForm = (form, metadata, onlyNames = []) => {
   if (submitter && submitter.name) {
     const input = document.createElement("input");
     input.type = "hidden";
+    const formId = submitter.getAttribute("form");
+    if (formId) {
+      input.setAttribute("form", form);
+    }
     input.name = submitter.name;
     input.value = submitter.value;
     submitter.parentElement.insertBefore(input, submitter);
@@ -4689,7 +4698,9 @@ var LiveSocket = class {
     });
   }
   afterNavigation(to, from) {
-    this.navigationCallbacks["afterEach"](to, from);
+    window.requestAnimationFrame(() => {
+      this.navigationCallbacks["afterEach"](to, from);
+    });
   }
   bindForms() {
     let iterations = 0;

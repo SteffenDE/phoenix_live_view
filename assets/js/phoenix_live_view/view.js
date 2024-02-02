@@ -64,6 +64,12 @@ let serializeForm = (form, metadata, onlyNames = []) => {
   if(submitter && submitter.name){
     const input = document.createElement("input")
     input.type = "hidden"
+    // set the form attribute if the submitter has one;
+    // this can happen if the element is outside the actual form element
+    const formId = submitter.getAttribute("form")
+    if(formId){
+      input.setAttribute("form", form)
+    }
     input.name = submitter.name
     input.value = submitter.value
     submitter.parentElement.insertBefore(input, submitter)
