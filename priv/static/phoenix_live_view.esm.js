@@ -1986,6 +1986,9 @@ var DOMPatch = class {
           dom_default.maybeAddPrivateHooks(toEl, phxViewportTop, phxViewportBottom);
           dom_default.cleanChildNodes(toEl, phxUpdate);
           if (this.skipCIDSibling(toEl)) {
+            dom_default.all(fromEl, "form", (form) => trackedForms.add(form));
+            if (fromEl.tagName === "FORM")
+              trackedForms.add(fromEl);
             this.maybeReOrderStream(fromEl);
             return false;
           }
