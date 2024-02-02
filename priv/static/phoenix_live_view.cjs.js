@@ -544,26 +544,21 @@ var DOM = {
       el.setAttribute("data-phx-hook", "Phoenix.InfiniteScroll");
     }
   },
-  maybeHideFeedback(container, forms, phxFeedbackFor, phxFeedbackGroup) {
+  maybeHideFeedback(container, inputs, phxFeedbackFor, phxFeedbackGroup) {
     let feedbacks = [];
     let inputNamesFocused = {};
     let feedbackGroups = {};
-    forms.forEach((form) => {
-      Array.from(form.elements).forEach((input) => {
-        const group = input.getAttribute(phxFeedbackGroup);
-        if (group && !(group in feedbackGroups)) {
-          feedbackGroups[group] = true;
-        }
-        if (!(input.name in inputNamesFocused)) {
-          inputNamesFocused[input.name] = false;
-        }
-        if (this.private(input, PHX_HAS_FOCUSED) || this.private(input, PHX_HAS_SUBMITTED)) {
-          inputNamesFocused[input.name] = true;
-          if (group) {
-            feedbackGroups[group] = false;
-          }
-        }
-      });
+    inputs.forEach((input) => {
+      const group = input.getAttribute(phxFeedbackGroup);
+      if (group && !(group in feedbackGroups))
+        feedbackGroups[group] = true;
+      if (!(input.name in inputNamesFocused))
+        inputNamesFocused[input.name] = false;
+      if (this.private(input, PHX_HAS_FOCUSED) || this.private(input, PHX_HAS_SUBMITTED)) {
+        inputNamesFocused[input.name] = true;
+        if (group)
+          feedbackGroups[group] = false;
+      }
     });
     for (const [name, focused] of Object.entries(inputNamesFocused)) {
       if (!focused) {
@@ -1878,7 +1873,7 @@ var DOMPatch = class {
     let phxViewportBottom = liveSocket.binding(PHX_VIEWPORT_BOTTOM);
     let phxTriggerExternal = liveSocket.binding(PHX_TRIGGER_ACTION);
     let added = [];
-    let trackedForms = new Set();
+    let trackedInputs = [];
     let updates = [];
     let appendPrependUpdates = [];
     let externalFormTriggered = null;
@@ -1965,7 +1960,7 @@ var DOMPatch = class {
             externalFormTriggered = el;
           }
           if (el.getAttribute && el.getAttribute("name") && dom_default.isFormInput(el)) {
-            trackedForms.add(el.form);
+            trackedInputs.push(el);
           }
           if (dom_default.isPhxChild(el) && view.ownsElement(el) || dom_default.isPhxSticky(el) && view.ownsElement(el.parentNode)) {
             this.trackAfter("phxChildAdded", el);
@@ -1999,6 +1994,9 @@ var DOMPatch = class {
           dom_default.maybeAddPrivateHooks(toEl, phxViewportTop, phxViewportBottom);
           dom_default.cleanChildNodes(toEl, phxUpdate);
           if (this.skipCIDSibling(toEl)) {
+            dom_default.all(fromEl, "form", (form) => Array.from(form.elements).forEach((el) => trackedInputs.push(el)));
+            if (fromEl.tagName === "FORM")
+              trackedInputs.push(fromEl);
             this.maybeReOrderStream(fromEl);
             return false;
           }
@@ -2042,7 +2040,7 @@ var DOMPatch = class {
             dom_default.syncAttrsToProps(fromEl);
             updates.push(fromEl);
             dom_default.applyStickyOperations(fromEl);
-            trackedForms.add(fromEl.form);
+            trackedInputs.push(fromEl);
             return false;
           } else {
             if (focusedSelectChanged) {
@@ -2054,7 +2052,7 @@ var DOMPatch = class {
             dom_default.syncAttrsToProps(toEl);
             dom_default.applyStickyOperations(toEl);
             if (toEl.getAttribute("name") && dom_default.isFormInput(toEl)) {
-              trackedForms.add(toEl.form);
+              trackedInputs.push(toEl);
             }
             this.trackBefore("updated", fromEl, toEl);
             return true;
@@ -2070,7 +2068,7 @@ var DOMPatch = class {
         appendPrependUpdates.forEach((update) => update.perform());
       });
     }
-    dom_default.maybeHideFeedback(targetContainer, trackedForms, phxFeedbackFor, phxFeedbackGroup);
+    dom_default.maybeHideFeedback(targetContainer, trackedInputs, phxFeedbackFor, phxFeedbackGroup);
     liveSocket.silenceEvents(() => dom_default.restoreFocus(focused, selectionStart, selectionEnd));
     dom_default.dispatchEvent(document, "phx:update");
     added.forEach((el) => this.trackAfter("added", el));
