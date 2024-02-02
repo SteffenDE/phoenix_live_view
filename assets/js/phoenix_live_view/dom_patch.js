@@ -296,6 +296,12 @@ export default class DOMPatch {
       })
     }
 
+    // bruteforce track all input elements in targetContainer (probably even multiple times)
+    DOM.all(targetContainer, "form", form => Array.from(form.elements).forEach(el => trackedInputs.push(el)))
+    DOM.all(targetContainer, "input", el => trackedInputs.push(el))
+    DOM.all(targetContainer, "select", el => trackedInputs.push(el))
+    DOM.all(targetContainer, "textarea", el => trackedInputs.push(el))
+
     DOM.maybeHideFeedback(targetContainer, trackedInputs, phxFeedbackFor, phxFeedbackGroup)
 
     liveSocket.silenceEvents(() => DOM.restoreFocus(focused, selectionStart, selectionEnd))

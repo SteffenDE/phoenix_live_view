@@ -2024,7 +2024,7 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
             dom_default.cleanChildNodes(toEl, phxUpdate);
             if (this.skipCIDSibling(toEl)) {
               dom_default.all(fromEl, "form", (form) => Array.from(form.elements).forEach((el) => trackedInputs.push(el)));
-              if (fromEl.tagName === "FORM")
+              if (dom_default.isFormInput(fromEl))
                 trackedInputs.push(fromEl);
               this.maybeReOrderStream(fromEl);
               return false;
@@ -2097,6 +2097,10 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
           appendPrependUpdates.forEach((update) => update.perform());
         });
       }
+      dom_default.all(targetContainer, "form", (form) => Array.from(form.elements).forEach((el) => trackedInputs.push(el)));
+      dom_default.all(targetContainer, "input", (el) => trackedInputs.push(el));
+      dom_default.all(targetContainer, "select", (el) => trackedInputs.push(el));
+      dom_default.all(targetContainer, "textarea", (el) => trackedInputs.push(el));
       dom_default.maybeHideFeedback(targetContainer, trackedInputs, phxFeedbackFor, phxFeedbackGroup);
       liveSocket.silenceEvents(() => dom_default.restoreFocus(focused, selectionStart, selectionEnd));
       dom_default.dispatchEvent(document, "phx:update");
