@@ -36,7 +36,15 @@ const FeedbackFor = {
     // when a container is updated
     const feedbackResults = {}
     feedbackContainers.forEach(el => {
+      // skip elements that are not in the DOM
+      if(!document.contains(el)) return
       const feedback = el.getAttribute(PHX_FEEDBACK_FOR)
+      if(!feedback){
+        // the container previously had phx-feedback-for, but now it doesn't
+        // remove the class from the container (if it exists)
+        JS.addOrRemoveClasses(el, [], [PHX_NO_FEEDBACK_CLASS])
+        return
+      }
       if(feedbackResults[feedback] === true){
         this.hideFeedback(el)
         return
