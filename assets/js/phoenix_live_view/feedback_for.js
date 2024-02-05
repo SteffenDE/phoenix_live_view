@@ -95,8 +95,11 @@ export const init = (liveSocket) => {
 
   liveSocket.domCallbacks.onBeforeElUpdated = (fromEl, toEl) => {
     // mark both from and to els as feedback containers, as we don't know yet which one will be used
-    if(FeedbackFor.isFeedbackContainer(fromEl)) feedbackContainers.push(fromEl)
-    if(FeedbackFor.isFeedbackContainer(toEl)) feedbackContainers.push(toEl)
+    // and we also need to remove the phx-no-feedback class when the phx-feedback-for attribute is removed
+    if(FeedbackFor.isFeedbackContainer(fromEl) || FeedbackFor.isFeedbackContainer(toEl)){
+      feedbackContainers.push(fromEl)
+      feedbackContainers.push(toEl)
+    }
     existingOnBeforeElUpdated(fromEl, toEl)
   }
 

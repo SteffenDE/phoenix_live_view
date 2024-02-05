@@ -46,7 +46,6 @@ var PHX_PRUNE = "data-phx-prune";
 var PHX_PAGE_LOADING = "page-loading";
 var PHX_CONNECTED_CLASS = "phx-connected";
 var PHX_LOADING_CLASS = "phx-loading";
-var PHX_NO_FEEDBACK_CLASS = "phx-no-feedback";
 var PHX_ERROR_CLASS = "phx-error";
 var PHX_CLIENT_ERROR_CLASS = "phx-client-error";
 var PHX_SERVER_ERROR_CLASS = "phx-server-error";
@@ -56,8 +55,6 @@ var PHX_ROOT_ID = "data-phx-root-id";
 var PHX_VIEWPORT_TOP = "viewport-top";
 var PHX_VIEWPORT_BOTTOM = "viewport-bottom";
 var PHX_TRIGGER_ACTION = "trigger-action";
-var PHX_FEEDBACK_FOR = "feedback-for";
-var PHX_FEEDBACK_GROUP = "feedback-group";
 var PHX_HAS_FOCUSED = "phx-has-focused";
 var FOCUSABLE_INPUTS = ["text", "textarea", "number", "email", "password", "search", "tel", "url", "date", "time", "datetime-local", "color", "range"];
 var CHECKABLE_INPUTS = ["checkbox", "radio"];
@@ -544,63 +541,11 @@ var DOM = {
       el.setAttribute("data-phx-hook", "Phoenix.InfiniteScroll");
     }
   },
-  maybeHideFeedback(container, inputs, phxFeedbackFor, phxFeedbackGroup) {
-    let forms = new Set(inputs.map((i) => i.form).filter((f) => f));
-    let feedbacks = [];
-    let inputNamesFocused = {};
-    let feedbackGroups = {};
-    forms.forEach((form) => {
-      Array.from(form.elements).forEach((input) => {
-        const group = input.getAttribute(phxFeedbackGroup);
-        if (group && !(group in feedbackGroups)) {
-          feedbackGroups[group] = true;
-        }
-        if (!(input.name in inputNamesFocused)) {
-          inputNamesFocused[input.name] = false;
-        }
-        if (this.private(input, PHX_HAS_FOCUSED) || this.private(input, PHX_HAS_SUBMITTED)) {
-          inputNamesFocused[input.name] = true;
-          if (group) {
-            feedbackGroups[group] = false;
-          }
-        }
-      });
-    });
-    for (const [name, focused] of Object.entries(inputNamesFocused)) {
-      if (!focused) {
-        feedbacks.push(name);
-        if (name.endsWith("[]")) {
-          feedbacks.push(name.slice(0, -2));
-        }
-      }
-    }
-    for (const [group, noFeedback] of Object.entries(feedbackGroups)) {
-      if (noFeedback)
-        feedbacks.push(group);
-    }
-    if (feedbacks.length > 0) {
-      let selector = feedbacks.map((f) => `[${phxFeedbackFor}="${f}"]`).join(", ");
-      DOM.all(container, selector, (el) => el.classList.add(PHX_NO_FEEDBACK_CLASS));
-    }
-  },
-  resetForm(form, phxFeedbackFor) {
+  resetForm(form) {
     Array.from(form.elements).forEach((input) => {
-      let query = `[${phxFeedbackFor}="${input.id}"],
-                   [${phxFeedbackFor}="${input.name}"],
-                   [${phxFeedbackFor}="${input.name.replace(/\[\]$/, "")}"]`;
       this.deletePrivate(input, PHX_HAS_FOCUSED);
       this.deletePrivate(input, PHX_HAS_SUBMITTED);
-      this.all(document, query, (feedbackEl) => {
-        feedbackEl.classList.add(PHX_NO_FEEDBACK_CLASS);
-      });
     });
-  },
-  showError(inputEl, phxFeedbackFor) {
-    if (inputEl.id || inputEl.name) {
-      this.all(inputEl.form, `[${phxFeedbackFor}="${inputEl.id}"], [${phxFeedbackFor}="${inputEl.name}"]`, (el) => {
-        this.removeClass(el, PHX_NO_FEEDBACK_CLASS);
-      });
-    }
   },
   isPhxChild(node) {
     return node.getAttribute && node.getAttribute(PHX_PARENT_ID);
@@ -1872,19 +1817,17 @@ var DOMPatch = class {
     let focused = liveSocket.getActiveElement();
     let { selectionStart, selectionEnd } = focused && dom_default.hasSelectionRange(focused) ? focused : {};
     let phxUpdate = liveSocket.binding(PHX_UPDATE);
-    let phxFeedbackFor = liveSocket.binding(PHX_FEEDBACK_FOR);
-    let phxFeedbackGroup = liveSocket.binding(PHX_FEEDBACK_GROUP);
     let disableWith = liveSocket.binding(PHX_DISABLE_WITH);
     let phxViewportTop = liveSocket.binding(PHX_VIEWPORT_TOP);
     let phxViewportBottom = liveSocket.binding(PHX_VIEWPORT_BOTTOM);
     let phxTriggerExternal = liveSocket.binding(PHX_TRIGGER_ACTION);
     let added = [];
-    let trackedInputs = [];
     let updates = [];
     let appendPrependUpdates = [];
     let externalFormTriggered = null;
     this.trackBefore("added", container);
     this.trackBefore("updated", container, container);
+    dom_default.dispatchEvent(document, "phx:update-start");
     liveSocket.time("morphdom", () => {
       this.streams.forEach(([ref, inserts, deleteIds, reset]) => {
         inserts.forEach(([key, streamAt, limit]) => {
@@ -1965,9 +1908,6 @@ var DOMPatch = class {
           if (dom_default.isNowTriggerFormExternal(el, phxTriggerExternal)) {
             externalFormTriggered = el;
           }
-          if (el.getAttribute && el.getAttribute("name") && dom_default.isFormInput(el)) {
-            trackedInputs.push(el);
-          }
           if (dom_default.isPhxChild(el) && view.ownsElement(el) || dom_default.isPhxSticky(el) && view.ownsElement(el.parentNode)) {
             this.trackAfter("phxChildAdded", el);
           }
@@ -2043,7 +1983,6 @@ var DOMPatch = class {
             dom_default.syncAttrsToProps(fromEl);
             updates.push(fromEl);
             dom_default.applyStickyOperations(fromEl);
-            trackedInputs.push(fromEl);
             return false;
           } else {
             if (focusedSelectChanged) {
@@ -2054,9 +1993,6 @@ var DOMPatch = class {
             }
             dom_default.syncAttrsToProps(toEl);
             dom_default.applyStickyOperations(toEl);
-            if (toEl.getAttribute("name") && dom_default.isFormInput(toEl)) {
-              trackedInputs.push(toEl);
-            }
             this.trackBefore("updated", fromEl, toEl);
             return true;
           }
@@ -2071,11 +2007,11 @@ var DOMPatch = class {
         appendPrependUpdates.forEach((update) => update.perform());
       });
     }
-    dom_default.maybeHideFeedback(targetContainer, trackedInputs, phxFeedbackFor, phxFeedbackGroup);
     liveSocket.silenceEvents(() => dom_default.restoreFocus(focused, selectionStart, selectionEnd));
     dom_default.dispatchEvent(document, "phx:update");
     added.forEach((el) => this.trackAfter("added", el));
     updates.forEach((el) => this.trackAfter("updated", el));
+    dom_default.dispatchEvent(document, "phx:update-end");
     this.transitionPendingRemoves();
     if (externalFormTriggered) {
       liveSocket.unload();
@@ -3718,7 +3654,6 @@ var View = class {
       cid
     };
     this.pushWithReply(refGenerator, "event", event, (resp) => {
-      dom_default.showError(inputEl, this.liveSocket.binding(PHX_FEEDBACK_FOR));
       if (dom_default.isUploadInput(inputEl) && dom_default.isAutoUpload(inputEl)) {
         if (LiveUploader.filesAwaitingPreflight(inputEl).length > 0) {
           let [ref, _els] = refGenerator();
@@ -3959,18 +3894,133 @@ var View = class {
   }
   submitForm(form, targetCtx, phxEvent, submitter, opts = {}) {
     dom_default.putPrivate(form, PHX_HAS_SUBMITTED, true);
-    let phxFeedback = this.liveSocket.binding(PHX_FEEDBACK_FOR);
-    let inputs = Array.from(form.elements);
+    const inputs = Array.from(form.elements);
     inputs.forEach((input) => dom_default.putPrivate(input, PHX_HAS_SUBMITTED, true));
     this.liveSocket.blurActiveElement(this);
     this.pushFormSubmit(form, targetCtx, phxEvent, submitter, opts, () => {
-      inputs.forEach((input) => dom_default.showError(input, phxFeedback));
       this.liveSocket.restorePreviouslyActiveFocus();
     });
   }
   binding(kind) {
     return this.liveSocket.binding(kind);
   }
+};
+
+// js/phoenix_live_view/feedback_for.js
+var PHX_FEEDBACK_FOR = "phx-feedback-for";
+var PHX_FEEDBACK_GROUP = "phx-feedback-group";
+var PHX_NO_FEEDBACK_CLASS = "phx-no-feedback";
+var FeedbackFor = {
+  showError(inputEl) {
+    if (inputEl.name) {
+      let query = this.feedbackSelector(inputEl);
+      document.querySelectorAll(query).forEach((el) => {
+        js_default.addOrRemoveClasses(el, [], [PHX_NO_FEEDBACK_CLASS]);
+      });
+    }
+  },
+  isFeedbackContainer(el) {
+    return el.hasAttribute && el.hasAttribute(PHX_FEEDBACK_FOR);
+  },
+  resetForm(form) {
+    Array.from(form.elements).forEach((input) => {
+      let query = this.feedbackSelector(input);
+      document.querySelectorAll(query).forEach((feedbackEl) => {
+        js_default.addOrRemoveClasses(feedbackEl, [PHX_NO_FEEDBACK_CLASS], []);
+      });
+    });
+  },
+  maybeHideFeedback(liveSocket, feedbackContainers) {
+    const feedbackResults = {};
+    feedbackContainers.forEach((el) => {
+      if (!document.contains(el))
+        return;
+      const feedback = el.getAttribute(PHX_FEEDBACK_FOR);
+      if (!feedback) {
+        js_default.addOrRemoveClasses(el, [], [PHX_NO_FEEDBACK_CLASS]);
+        return;
+      }
+      if (feedbackResults[feedback] === true) {
+        this.hideFeedback(el);
+        return;
+      }
+      feedbackResults[feedback] = this.shouldHideFeedback(liveSocket, feedback, PHX_FEEDBACK_GROUP);
+      if (feedbackResults[feedback] === true) {
+        this.hideFeedback(el);
+      }
+    });
+  },
+  hideFeedback(el) {
+    js_default.addOrRemoveClasses(el, [PHX_NO_FEEDBACK_CLASS], []);
+  },
+  shouldHideFeedback(liveSocket, nameOrGroup, phxFeedbackGroup) {
+    const query = `[name="${nameOrGroup}"],
+                   [name="${nameOrGroup}[]"],
+                   [${phxFeedbackGroup}="${nameOrGroup}"]`;
+    let interacted = false;
+    document.querySelectorAll(query).forEach((input) => {
+      if (liveSocket.inputInteracted(input)) {
+        interacted = true;
+      }
+    });
+    return !interacted;
+  },
+  feedbackSelector(input) {
+    let query = `[${PHX_FEEDBACK_FOR}="${input.name}"],
+                 [${PHX_FEEDBACK_FOR}="${input.name.replace(/\[\]$/, "")}"]`;
+    if (input.getAttribute(PHX_FEEDBACK_GROUP)) {
+      query += `,[${PHX_FEEDBACK_FOR}="${input.getAttribute(PHX_FEEDBACK_GROUP)}"]`;
+    }
+    return query;
+  }
+};
+var init = (liveSocket) => {
+  let feedbackContainers = [];
+  let inputPending = false;
+  let submitPending = false;
+  const existingOnBeforeElUpdated = liveSocket.domCallbacks.onBeforeElUpdated;
+  const existingOnNodeAdded = liveSocket.domCallbacks.onNodeAdded;
+  liveSocket.domCallbacks.onBeforeElUpdated = (fromEl, toEl) => {
+    if (FeedbackFor.isFeedbackContainer(fromEl) || FeedbackFor.isFeedbackContainer(toEl)) {
+      feedbackContainers.push(fromEl);
+      feedbackContainers.push(toEl);
+    }
+    existingOnBeforeElUpdated(fromEl, toEl);
+  };
+  liveSocket.domCallbacks.onNodeAdded = (el) => {
+    if (FeedbackFor.isFeedbackContainer(el))
+      feedbackContainers.push(el);
+    existingOnNodeAdded(el);
+  };
+  const onPatchStart = () => feedbackContainers = [];
+  const onPatchEnd = () => {
+    if (inputPending) {
+      FeedbackFor.showError(inputPending);
+      inputPending = null;
+    }
+    if (submitPending) {
+      Array.from(submitPending.elements).forEach((input) => FeedbackFor.showError(input));
+      submitPending = null;
+    }
+    FeedbackFor.maybeHideFeedback(liveSocket, feedbackContainers);
+  };
+  const onInput = (e) => inputPending = e.target;
+  const onSubmit = (e) => submitPending = e.target;
+  const onReset = (e) => FeedbackFor.resetForm(e.target);
+  window.addEventListener("change", onInput);
+  window.addEventListener("input", onInput);
+  window.addEventListener("submit", onSubmit);
+  window.addEventListener("reset", onReset);
+  document.addEventListener("phx:update-start", onPatchStart);
+  document.addEventListener("phx:update-end", onPatchEnd);
+  return () => {
+    document.removeEventListener("phx:update-start", onPatchStart);
+    document.removeEventListener("phx:update-end", onPatchEnd);
+    window.removeEventListener("change", onInput);
+    window.removeEventListener("input", onInput);
+    window.removeEventListener("submit", onSubmit);
+    window.removeEventListener("reset", onReset);
+  };
 };
 
 // js/phoenix_live_view/live_socket.js
@@ -4025,6 +4075,7 @@ var LiveSocket = class {
         window.location.reload();
       }
     });
+    init(this);
   }
   isProfileEnabled() {
     return this.sessionStorage.getItem(PHX_LV_PROFILE) === "true";
@@ -4094,6 +4145,9 @@ var LiveSocket = class {
   }
   execJS(el, encodedJS, eventType = null) {
     this.owner(el, (view) => js_default.exec(eventType, encodedJS, view, el));
+  }
+  inputInteracted(el) {
+    return dom_default.private(el, PHX_HAS_FOCUSED) || dom_default.private(el, PHX_HAS_SUBMITTED);
   }
   execJSHookPush(el, phxEvent, data, callback) {
     this.withinOwners(el, (view) => {
@@ -4738,7 +4792,7 @@ var LiveSocket = class {
     }
     this.on("reset", (e) => {
       let form = e.target;
-      dom_default.resetForm(form, this.binding(PHX_FEEDBACK_FOR));
+      dom_default.resetForm(form);
       let input = Array.from(form.elements).find((el) => el.type === "reset");
       if (input) {
         window.requestAnimationFrame(() => {
