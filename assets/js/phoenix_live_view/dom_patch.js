@@ -168,6 +168,7 @@ export default class DOMPatch {
         },
         onBeforeNodeAdded: (el) => {
           DOM.maybeAddPrivateHooks(el, phxViewportTop, phxViewportBottom)
+          if(DOM.isFeedbackContainer(el, phxFeedbackFor)) feedbackContainers.push(el)
           this.trackBefore("added", el)
           return el
         },
@@ -211,6 +212,12 @@ export default class DOMPatch {
         },
         onBeforeElUpdated: (fromEl, toEl) => {
           DOM.maybeAddPrivateHooks(toEl, phxViewportTop, phxViewportBottom)
+          // mark both from and to els as feedback containers, as we don't know yet which one will be used
+          // and we also need to remove the phx-no-feedback class when the phx-feedback-for attribute is removed
+          if(DOM.isFeedbackContainer(fromEl, phxFeedbackFor) || DOM.isFeedbackContainer(toEl, phxFeedbackFor)){
+            feedbackContainers.push(fromEl)
+            feedbackContainers.push(toEl)
+          }
           DOM.cleanChildNodes(toEl, phxUpdate)
           if(this.skipCIDSibling(toEl)){
             // if this is a live component used in a stream, we may need to reorder it

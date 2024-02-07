@@ -21,6 +21,8 @@ import {
   THROTTLED
 } from "./constants"
 
+import JS from "./js"
+
 import {
   logError
 } from "./utils"
