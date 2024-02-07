@@ -13,9 +13,6 @@ import {
   PHX_ERROR_CLASS,
   PHX_CLIENT_ERROR_CLASS,
   PHX_SERVER_ERROR_CLASS,
-  PHX_FEEDBACK_FOR,
-  PHX_FEEDBACK_GROUP,
-  PHX_HAS_FOCUSED,
   PHX_HAS_SUBMITTED,
   PHX_HOOK,
   PHX_PAGE_LOADING,
@@ -383,6 +380,7 @@ export default class View {
 
   triggerBeforeUpdateHook(fromEl, toEl){
     this.liveSocket.triggerDOM("onBeforeElUpdated", [fromEl, toEl])
+    DOM.dispatchEvent(document, "phx:patch-before-el-updated", {detail: {fromEl, toEl}})
     let hook = this.getHook(fromEl)
     let isIgnored = hook && DOM.isIgnored(fromEl, this.binding(PHX_UPDATE))
     if(hook && !fromEl.isEqualNode(toEl) && !(isIgnored && isEqualObj(fromEl.dataset, toEl.dataset))){
@@ -412,6 +410,7 @@ export default class View {
 
     patch.after("added", el => {
       this.liveSocket.triggerDOM("onNodeAdded", [el])
+      DOM.dispatchEvent(document, "phx:patch-node-added", {detail: {el}})
       let phxViewportTop = this.binding(PHX_VIEWPORT_TOP)
       let phxViewportBottom = this.binding(PHX_VIEWPORT_BOTTOM)
       DOM.maybeAddPrivateHooks(el, phxViewportTop, phxViewportBottom)
@@ -943,7 +942,6 @@ export default class View {
       cid: cid
     }
     this.pushWithReply(refGenerator, "event", event, resp => {
-      DOM.showError(inputEl, this.liveSocket.binding(PHX_FEEDBACK_FOR), this.liveSocket.binding(PHX_FEEDBACK_GROUP))
       if(DOM.isUploadInput(inputEl) && DOM.isAutoUpload(inputEl)){
         if(LiveUploader.filesAwaitingPreflight(inputEl).length > 0){
           let [ref, _els] = refGenerator()
@@ -1220,13 +1218,10 @@ export default class View {
 
   submitForm(form, targetCtx, phxEvent, submitter, opts = {}){
     DOM.putPrivate(form, PHX_HAS_SUBMITTED, true)
-    const phxFeedbackFor = this.liveSocket.binding(PHX_FEEDBACK_FOR)
-    const phxFeedbackGroup = this.liveSocket.binding(PHX_FEEDBACK_GROUP)
     const inputs = Array.from(form.elements)
     inputs.forEach(input => DOM.putPrivate(input, PHX_HAS_SUBMITTED, true))
     this.liveSocket.blurActiveElement(this)
     this.pushFormSubmit(form, targetCtx, phxEvent, submitter, opts, () => {
-      inputs.forEach(input => DOM.showError(input, phxFeedbackFor, phxFeedbackGroup))
       this.liveSocket.restorePreviouslyActiveFocus()
     })
   }

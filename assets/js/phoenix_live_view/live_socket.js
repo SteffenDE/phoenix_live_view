@@ -82,6 +82,7 @@ import {
   PHX_DEBOUNCE,
   PHX_DROP_TARGET,
   PHX_HAS_FOCUSED,
+  PHX_HAS_SUBMITTED,
   PHX_KEY,
   PHX_LINK_STATE,
   PHX_LIVE_LINK,
@@ -95,8 +96,6 @@ import {
   PHX_THROTTLE,
   PHX_TRACK_UPLOADS,
   PHX_SESSION,
-  PHX_FEEDBACK_FOR,
-  PHX_FEEDBACK_GROUP,
   RELOAD_JITTER_MIN,
   RELOAD_JITTER_MAX,
   PHX_REF,
@@ -236,6 +235,14 @@ export default class LiveSocket {
 
   execJS(el, encodedJS, eventType = null){
     this.owner(el, view => JS.exec(eventType, encodedJS, view, el))
+  }
+
+  inputInteracted(el){
+    return DOM.private(el, PHX_HAS_FOCUSED) || DOM.private(el, PHX_HAS_SUBMITTED)
+  }
+
+  addOrRemoveClasses(el, add, remove){
+    return JS.addOrRemoveClasses(el, add, remove)
   }
 
   // private
@@ -880,7 +887,7 @@ export default class LiveSocket {
     }
     this.on("reset", (e) => {
       let form = e.target
-      DOM.resetForm(form, this.binding(PHX_FEEDBACK_FOR), this.binding(PHX_FEEDBACK_GROUP))
+      DOM.resetForm(form)
       let input = Array.from(form.elements).find(el => el.type === "reset")
       if(input){
         // wait until next tick to get updated input value

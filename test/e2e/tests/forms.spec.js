@@ -274,7 +274,7 @@ test("can dynamically add/remove inputs using checkboxes", async ({ page }) => {
   }));
 });
 
-test("phx-no-feedback is applied correctly", async ({ page }) => {
+test("phx-no-feedback is applied correctly (legacy drop-in)", async ({ page }) => {
   await page.goto("/form/feedback");
   await syncLV(page);
 
