@@ -1540,7 +1540,7 @@ function morphdomFactory(morphAttrs2) {
       }
     }
     function morphChildren(fromEl, toEl) {
-      var skipFrom = skipFromChildren(fromEl);
+      var skipFrom = skipFromChildren(fromEl, toEl);
       var curToNodeChild = toEl.firstChild;
       var curFromNodeChild = fromEl.firstChild;
       var curToNodeKey;
@@ -1577,6 +1577,7 @@ function morphdomFactory(morphAttrs2) {
                           removeNode(curFromNodeChild, fromEl, true);
                         }
                         curFromNodeChild = matchingFromEl;
+                        curFromNodeKey = getNodeKey(curFromNodeChild);
                       }
                     } else {
                       isCompatible = false;
@@ -4233,7 +4234,7 @@ var LiveSocket = class {
     let phxClickAway = this.binding("click-away");
     dom_default.all(document, `[${phxClickAway}]`, (el) => {
       if (!(el.isSameNode(clickStartedAt) || el.contains(clickStartedAt))) {
-        this.withinOwners(e.target, (view) => {
+        this.withinOwners(el, (view) => {
           let phxEvent = el.getAttribute(phxClickAway);
           if (js_default.isVisible(el)) {
             js_default.exec("click", phxEvent, view, el, ["push", { data: this.eventMeta("click", e, e.target) }]);
