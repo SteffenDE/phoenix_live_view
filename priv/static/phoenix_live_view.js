@@ -2418,6 +2418,8 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       if (!reset && !isNew) {
         return;
       }
+      if (!el.parentElement)
+        return;
       if (streamAt === 0) {
         el.parentElement.insertBefore(el, el.parentElement.firstElementChild);
       } else if (streamAt > 0) {
