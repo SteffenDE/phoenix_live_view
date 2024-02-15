@@ -2392,11 +2392,11 @@ removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"
       }
     }
     removeStreamChildElement(child) {
-      if (!this.maybePendingRemove(child)) {
-        if (this.streamInserts[child.id]) {
-          this.streamComponentRestore[child.id] = child;
-          child.remove();
-        } else {
+      if (this.streamInserts[child.id]) {
+        this.streamComponentRestore[child.id] = child;
+        child.remove();
+      } else {
+        if (!this.maybePendingRemove(child)) {
           child.remove();
           this.onNodeDiscarded(child);
         }
