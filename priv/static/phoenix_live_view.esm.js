@@ -2666,6 +2666,8 @@ var Rendered = class {
       let targetVal = target[key];
       if (isObject(val) && val[STATIC] === void 0 && isObject(targetVal)) {
         merged[key] = this.cloneMerge(targetVal, val, pruneMagicId);
+      } else if (val === void 0 && isObject(targetVal)) {
+        merged[key] = this.cloneMerge(targetVal, {}, pruneMagicId);
       }
     }
     if (pruneMagicId) {
