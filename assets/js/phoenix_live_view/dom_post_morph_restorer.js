@@ -61,5 +61,11 @@ export default class DOMPostMorphRestorer {
         maybe(document.getElementById(elemId), elem => container.insertAdjacentElement("afterbegin", elem))
       })
     }
+
+    if(this.updateType == "append"){
+      this.elementIdsToAdd.forEach(elemId => {
+        maybe(document.getElementById(elemId), elem => container.insertAdjacentElement("beforeend", elem))
+      })
+    }
   }
 }

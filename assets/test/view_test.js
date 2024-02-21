@@ -909,7 +909,12 @@ describe("View Hooks", function(){
     let fromHTML, toHTML = null
     let liveSocket = new LiveSocket("/live", Socket, {
       dom: {
-        onBeforeElUpdated(from, to){ fromHTML = from.innerHTML; toHTML = to.innerHTML }
+        onBeforeElUpdated(from, to){ 
+          if(from.nodeType === Node.ELEMENT_NODE && to.nodeType === Node.ELEMENT_NODE){
+            fromHTML = from.innerHTML
+            toHTML = to.innerHTML
+          }
+        }
       }
     })
     let el = liveViewDOM()

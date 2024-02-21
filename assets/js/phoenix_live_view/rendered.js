@@ -335,6 +335,10 @@ export default class Rendered {
       } else {
         attrs = rootAttrs
       }
+      // alpine morph uses a simpler algorithm than morphdom and will not find
+      // all elements, therefore adding nested skips while removing the original node
+      // force disable the optimization...
+      skip = false
       if(skip){ attrs[PHX_SKIP] = true }
       let [newRoot, commentBefore, commentAfter] = modifyRoot(output.buffer, attrs, skip)
       rendered.newRender = false

@@ -1,5 +1,4 @@
 import {
-  PHX_COMPONENT,
   PHX_DISABLE_WITH,
   PHX_FEEDBACK_FOR,
   PHX_FEEDBACK_GROUP,
@@ -22,18 +21,24 @@ import {
   isCid
 } from "./utils"
 
+import specialElHandlers from "./dom_patch_special_els"
+
 import DOM from "./dom"
 import DOMPostMorphRestorer from "./dom_post_morph_restorer"
-import morphdom from "morphdom"
+
+import Alpine from "alpinejs"
+import morph from "@alpinejs/morph"
+
+window.Alpine = Alpine
+Alpine.plugin(morph)
 
 export default class DOMPatch {
   static patchEl(fromEl, toEl, activeElement){
-    morphdom(fromEl, toEl, {
-      childrenOnly: false,
-      onBeforeElUpdated: (fromEl, toEl) => {
+    Alpine.morph(fromEl, toEl, {
+      updating: (fromEl, toEl, _childrenOnly, skip) => {
         if(activeElement && activeElement.isSameNode(fromEl) && DOM.isFormInput(fromEl)){
           DOM.mergeFocusedInput(fromEl, toEl)
-          return false
+          skip()
         }
       }
     })
@@ -99,39 +104,45 @@ export default class DOMPatch {
 
     let externalFormTriggered = null
 
+    function handleAdded(el){
+      if(el.getAttribute){ this.maybeReOrderStream(el, true) }
+      if(DOM.isFeedbackContainer(el, phxFeedbackFor)) feedbackContainers.push(el)
+
+      // hack to fix Safari handling of img srcset and video tags
+      if(el instanceof HTMLImageElement && el.srcset){
+        el.srcset = el.srcset
+      } else if(el instanceof HTMLVideoElement && el.autoplay){
+        el.play()
+      }
+      if(DOM.isNowTriggerFormExternal(el, phxTriggerExternal)){
+        externalFormTriggered = el
+      }
+      // nested view handling
+      if((DOM.isPhxChild(el) && view.ownsElement(el)) || DOM.isPhxSticky(el) && view.ownsElement(el.parentNode)){
+        this.trackAfter("phxChildAdded", el)
+      }
+      added.push(el)
+      // alpine does not recurse into child nodes, so we need to do it ourselves
+      if(el.children){
+        Array.from(el.children).forEach(child => handleAdded.bind(this)(child))
+      }
+    }
+
     function morph(targetContainer, source){
-      morphdom(targetContainer, source, {
-        childrenOnly: targetContainer.getAttribute(PHX_COMPONENT) === null,
-        getNodeKey: (node) => {
+      Alpine.morph(targetContainer, source, {
+        // childrenOnly: targetContainer.getAttribute(PHX_COMPONENT) === null,
+        key: (node) => {
           if(DOM.isPhxDestroyed(node)){ return null }
           // If we have a join patch, then by definition there was no PHX_MAGIC_ID.
           // This is important to reduce the amount of elements morphdom discards.
           if(isJoinPatch){ return node.id }
           return node.id || (node.getAttribute && node.getAttribute(PHX_MAGIC_ID))
         },
-        // skip indexing from children when container is stream
-        skipFromChildren: (from) => { return from.getAttribute(phxUpdate) === PHX_STREAM },
-        // tell morphdom how to add a child
-        addChild: (parent, child) => {
-          let {ref, streamAt} = this.getStreamInsert(child)
-          if(ref === undefined){ return parent.appendChild(child) }
-
-          this.setStreamRef(child, ref)
-
-          // streaming
-          if(streamAt === 0){
-            parent.insertAdjacentElement("afterbegin", child)
-          } else if(streamAt === -1){
-            parent.appendChild(child)
-          } else if(streamAt > 0){
-            let sibling = Array.from(parent.children)[streamAt]
-            parent.insertBefore(child, sibling)
-          }
-        },
-        onBeforeNodeAdded: (el) => {
+        adding: (el) => {
           DOM.maybeAddPrivateHooks(el, phxViewportTop, phxViewportBottom)
           this.trackBefore("added", el)
-
+        },
+        added: (el) => {
           let morphedEl = el
           // this is a stream item that was kept on reset, recursively morph it
           if(!isJoinPatch && this.streamComponentRestore[el.id]){
@@ -139,49 +150,33 @@ export default class DOMPatch {
             delete this.streamComponentRestore[el.id]
             morph.bind(this)(morphedEl, el)
           }
-
-          return morphedEl
+          el.replaceWith(morphedEl)
+          handleAdded.bind(this)(morphedEl)
         },
-        onNodeAdded: (el) => {
-          if(el.getAttribute){ this.maybeReOrderStream(el, true) }
-          if(DOM.isFeedbackContainer(el, phxFeedbackFor)) feedbackContainers.push(el)
-
-          // hack to fix Safari handling of img srcset and video tags
-          if(el instanceof HTMLImageElement && el.srcset){
-            el.srcset = el.srcset
-          } else if(el instanceof HTMLVideoElement && el.autoplay){
-            el.play()
-          }
-          if(DOM.isNowTriggerFormExternal(el, phxTriggerExternal)){
-            externalFormTriggered = el
-          }
-
-          // nested view handling
-          if((DOM.isPhxChild(el) && view.ownsElement(el)) || DOM.isPhxSticky(el) && view.ownsElement(el.parentNode)){
-            this.trackAfter("phxChildAdded", el)
-          }
-          added.push(el)
+        removed: (el) => {
+          this.onNodeDiscarded(el)
         },
-        onNodeDiscarded: (el) => this.onNodeDiscarded(el),
-        onBeforeNodeDiscarded: (el) => {
-          if(el.getAttribute && el.getAttribute(PHX_PRUNE) !== null){ return true }
+        removing: (el, skip) => {
+          if(el.getAttribute && el.getAttribute(PHX_PRUNE) !== null){ return skip() }
           if(el.parentElement !== null && el.id &&
             DOM.isPhxUpdate(el.parentElement, phxUpdate, [PHX_STREAM, "append", "prepend"])){
-            return false
+            return skip()
           }
-          if(this.maybePendingRemove(el)){ return false }
-          if(this.skipCIDSibling(el)){ return false }
-
-          return true
+          if(DOM.isPhxSticky(el)){
+            return skip()
+          }
+          if(this.maybePendingRemove(el)){ return skip() }
+          if(this.skipCIDSibling(el)){ return skip() }
         },
-        onElUpdated: (el) => {
+        updated: (el) => {
           if(DOM.isNowTriggerFormExternal(el, phxTriggerExternal)){
             externalFormTriggered = el
           }
           updates.push(el)
           this.maybeReOrderStream(el, false)
         },
-        onBeforeElUpdated: (fromEl, toEl) => {
+        updating: (fromEl, toEl, childrenOnly, skip) => {
+          if(toEl.getAttribute && toEl.getAttribute("data-phx-only-children") != null) return childrenOnly()
           DOM.maybeAddPrivateHooks(toEl, phxViewportTop, phxViewportBottom)
           // mark both from and to els as feedback containers, as we don't know yet which one will be used
           // and we also need to remove the phx-no-feedback class when the phx-feedback-for attribute is removed
@@ -193,24 +188,28 @@ export default class DOMPatch {
           if(this.skipCIDSibling(toEl)){
             // if this is a live component used in a stream, we may need to reorder it
             this.maybeReOrderStream(fromEl)
-            return false
+            return skip()
           }
-          if(DOM.isPhxSticky(fromEl)){ return false }
+          if(DOM.isPhxSticky(fromEl)){
+            return skip()
+          }
           if(DOM.isIgnored(fromEl, phxUpdate) || (fromEl.form && fromEl.form.isSameNode(externalFormTriggered))){
             this.trackBefore("updated", fromEl, toEl)
             DOM.mergeAttrs(fromEl, toEl, {isIgnored: true})
             updates.push(fromEl)
             DOM.applyStickyOperations(fromEl)
-            return false
+            return skip()
           }
-          if(fromEl.type === "number" && (fromEl.validity && fromEl.validity.badInput)){ return false }
+          if(fromEl.type === "number" && (fromEl.validity && fromEl.validity.badInput)){
+            return skip()
+          }
           if(!DOM.syncPendingRef(fromEl, toEl, disableWith)){
             if(DOM.isUploadInput(fromEl)){
               this.trackBefore("updated", fromEl, toEl)
               updates.push(fromEl)
             }
             DOM.applyStickyOperations(fromEl)
-            return false
+            return skip()
           }
 
           // nested view handling
@@ -220,7 +219,7 @@ export default class DOMPatch {
             if(prevSession !== ""){ fromEl.setAttribute(PHX_SESSION, prevSession) }
             fromEl.setAttribute(PHX_ROOT_ID, this.rootID)
             DOM.applyStickyOperations(fromEl)
-            return false
+            return skip()
           }
 
           // input handling
@@ -235,7 +234,7 @@ export default class DOMPatch {
             DOM.syncAttrsToProps(fromEl)
             updates.push(fromEl)
             DOM.applyStickyOperations(fromEl)
-            return false
+            return skip()
           } else {
             // blur focused select if it changed so native UI is updated (ie safari won't update visible options)
             if(focusedSelectChanged){ fromEl.blur() }
@@ -245,10 +244,13 @@ export default class DOMPatch {
 
             DOM.syncAttrsToProps(toEl)
             DOM.applyStickyOperations(toEl)
+            var specialElHandler = specialElHandlers[fromEl.nodeName]
+            if(specialElHandler){
+              specialElHandler(fromEl, toEl)
+            }
             this.trackBefore("updated", fromEl, toEl)
-            return true
           }
-        }
+        },
       })
     }
 
@@ -319,6 +321,10 @@ export default class DOMPatch {
     // nested view handling
     if(DOM.isPhxChild(el) || DOM.isPhxSticky(el)){ this.liveSocket.destroyViewByEl(el) }
     this.trackAfter("discarded", el)
+    // alpine does not recurse into child nodes, so we need to do it ourselves
+    if(el.children){
+      Array.from(el.children).forEach(child => this.onNodeDiscarded(child))
+    }
   }
 
   maybePendingRemove(node){
@@ -372,7 +378,9 @@ export default class DOMPatch {
     // reordering does not make sense in that case anyway
     if(!el.parentElement){ return }
 
-    if(streamAt === 0){
+    if(streamAt === -1){
+      el.parentElement.insertAdjacentElement("beforeend", el)
+    } else if(streamAt === 0){
       el.parentElement.insertBefore(el, el.parentElement.firstElementChild)
     } else if(streamAt > 0){
       let children = Array.from(el.parentElement.children)

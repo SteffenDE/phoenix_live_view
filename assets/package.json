@@ -10,7 +10,8 @@
     "test.watch": "jest --watch"
   },
   "dependencies": {
-    "morphdom": "2.7.2"
+    "@alpinejs/morph": "git+https://github.com/SteffenDE/alpine-morph.git",
+    "alpinejs": "git+https://github.com/SteffenDE/alpinejs.git"
   },
   "devDependencies": {
     "@babel/cli": "7.23.4",
