@@ -24,18 +24,20 @@ import {
 
 import DOM from "./dom"
 import DOMPostMorphRestorer from "./dom_post_morph_restorer"
-import morphdom from "morphdom"
+import Idiomorph from "idiomorph/dist/idiomorph.cjs"
+
 
 export default class DOMPatch {
   static patchEl(fromEl, toEl, activeElement){
-    morphdom(fromEl, toEl, {
-      childrenOnly: false,
-      onBeforeElUpdated: (fromEl, toEl) => {
-        if(activeElement && activeElement.isSameNode(fromEl) && DOM.isFormInput(fromEl)){
-          DOM.mergeFocusedInput(fromEl, toEl)
-          return false
+    Idiomorph.morph(fromEl, toEl, {
+      callbacks: {
+        beforeNodeMorphed: (fromEl, toEl) => {
+          if(activeElement && activeElement.isSameNode(fromEl) && DOM.isFormInput(fromEl)){
+            DOM.mergeFocusedInput(fromEl, toEl)
+            return false
+          }
         }
-      }
+      },
     })
   }
 
@@ -49,6 +51,7 @@ export default class DOMPatch {
     this.streams = streams
     this.streamInserts = {}
     this.streamComponentRestore = {}
+    this.nodeRestore = {}
     this.targetCID = targetCID
     this.cidPatch = isCid(this.targetCID)
     this.pendingRemoves = []
@@ -99,154 +102,162 @@ export default class DOMPatch {
 
     let externalFormTriggered = null
 
+    function getNodeKey(node){
+      if(DOM.isPhxDestroyed(node)){ return null }
+      // If we have a join patch, then by definition there was no PHX_MAGIC_ID.
+      // This is important to reduce the amount of elements morphdom discards.
+      if(isJoinPatch){ return node.id }
+      return node.id || (node.getAttribute && node.getAttribute(PHX_MAGIC_ID))
+    }
+
+    function handleBeforeNodeMorphed(fromEl, toEl){
+      DOM.maybeAddPrivateHooks(toEl, phxViewportTop, phxViewportBottom)
+      // mark both from and to els as feedback containers, as we don't know yet which one will be used
+      // and we also need to remove the phx-no-feedback class when the phx-feedback-for attribute is removed
+      if(DOM.isFeedbackContainer(fromEl, phxFeedbackFor) || DOM.isFeedbackContainer(toEl, phxFeedbackFor)){
+        feedbackContainers.push(fromEl)
+        feedbackContainers.push(toEl)
+      }
+      DOM.cleanChildNodes(toEl, phxUpdate)
+      if(this.skipCIDSibling(toEl)){
+        return false
+      }
+      if(DOM.isPhxSticky(fromEl)){ return false }
+      if(DOM.isIgnored(fromEl, phxUpdate) || (fromEl.form && fromEl.form.isSameNode(externalFormTriggered))){
+        this.trackBefore("updated", fromEl, toEl)
+        DOM.mergeAttrs(fromEl, toEl, {isIgnored: true})
+        updates.push(fromEl)
+        DOM.applyStickyOperations(fromEl)
+        return false
+      }
+      if(fromEl.type === "number" && (fromEl.validity && fromEl.validity.badInput)){ return false }
+      if(!DOM.syncPendingRef(fromEl, toEl, disableWith)){
+        if(DOM.isUploadInput(fromEl)){
+          this.trackBefore("updated", fromEl, toEl)
+          updates.push(fromEl)
+        }
+        DOM.applyStickyOperations(fromEl)
+        return false
+      }
+
+      // nested view handling
+      if(DOM.isPhxChild(toEl)){
+        let prevSession = fromEl.getAttribute(PHX_SESSION)
+        DOM.mergeAttrs(fromEl, toEl, {exclude: [PHX_STATIC]})
+        if(prevSession !== ""){ fromEl.setAttribute(PHX_SESSION, prevSession) }
+        fromEl.setAttribute(PHX_ROOT_ID, this.rootID)
+        DOM.applyStickyOperations(fromEl)
+        return false
+      }
+
+      // input handling
+      DOM.copyPrivates(toEl, fromEl)
+
+      let isFocusedFormEl = focused && fromEl.isSameNode(focused) && DOM.isFormInput(fromEl)
+      // skip patching focused inputs unless focus is a select that has changed options
+      let focusedSelectChanged = isFocusedFormEl && this.isChangedSelect(fromEl, toEl)
+      if(isFocusedFormEl && fromEl.type !== "hidden" && !focusedSelectChanged){
+        this.trackBefore("updated", fromEl, toEl)
+        DOM.mergeFocusedInput(fromEl, toEl)
+        DOM.syncAttrsToProps(fromEl)
+        updates.push(fromEl)
+        DOM.applyStickyOperations(fromEl)
+        return false
+      } else {
+        // blur focused select if it changed so native UI is updated (ie safari won't update visible options)
+        if(focusedSelectChanged){ fromEl.blur() }
+        if(DOM.isPhxUpdate(toEl, phxUpdate, ["append", "prepend"])){
+          appendPrependUpdates.push(new DOMPostMorphRestorer(fromEl, toEl, toEl.getAttribute(phxUpdate)))
+        }
+
+        DOM.syncAttrsToProps(toEl)
+        DOM.applyStickyOperations(toEl)
+        this.trackBefore("updated", fromEl, toEl)
+        return true
+      }
+    }
+
     function morph(targetContainer, source){
-      morphdom(targetContainer, source, {
-        childrenOnly: targetContainer.getAttribute(PHX_COMPONENT) === null,
-        getNodeKey: (node) => {
-          if(DOM.isPhxDestroyed(node)){ return null }
-          // If we have a join patch, then by definition there was no PHX_MAGIC_ID.
-          // This is important to reduce the amount of elements morphdom discards.
-          if(isJoinPatch){ return node.id }
-          return node.id || (node.getAttribute && node.getAttribute(PHX_MAGIC_ID))
-        },
-        // skip indexing from children when container is stream
-        skipFromChildren: (from) => { return from.getAttribute(phxUpdate) === PHX_STREAM },
-        // tell morphdom how to add a child
-        addChild: (parent, child) => {
-          let {ref, streamAt} = this.getStreamInsert(child)
-          if(ref === undefined){ return parent.appendChild(child) }
-
-          this.setStreamRef(child, ref)
-
-          // streaming
-          if(streamAt === 0){
-            parent.insertAdjacentElement("afterbegin", child)
-          } else if(streamAt === -1){
-            parent.appendChild(child)
-          } else if(streamAt > 0){
-            let sibling = Array.from(parent.children)[streamAt]
-            parent.insertBefore(child, sibling)
-          }
-        },
-        onBeforeNodeAdded: (el) => {
-          DOM.maybeAddPrivateHooks(el, phxViewportTop, phxViewportBottom)
-          this.trackBefore("added", el)
-
-          let morphedEl = el
-          // this is a stream item that was kept on reset, recursively morph it
-          if(!isJoinPatch && this.streamComponentRestore[el.id]){
-            morphedEl = this.streamComponentRestore[el.id]
-            delete this.streamComponentRestore[el.id]
-            morph.bind(this)(morphedEl, el)
-          }
-
-          return morphedEl
-        },
-        onNodeAdded: (el) => {
-          if(el.getAttribute){ this.maybeReOrderStream(el, true) }
-          if(DOM.isFeedbackContainer(el, phxFeedbackFor)) feedbackContainers.push(el)
-
-          // hack to fix Safari handling of img srcset and video tags
-          if(el instanceof HTMLImageElement && el.srcset){
-            el.srcset = el.srcset
-          } else if(el instanceof HTMLVideoElement && el.autoplay){
-            el.play()
-          }
-          if(DOM.isNowTriggerFormExternal(el, phxTriggerExternal)){
-            externalFormTriggered = el
-          }
-
-          // nested view handling
-          if((DOM.isPhxChild(el) && view.ownsElement(el)) || DOM.isPhxSticky(el) && view.ownsElement(el.parentNode)){
-            this.trackAfter("phxChildAdded", el)
-          }
-          added.push(el)
-        },
-        onNodeDiscarded: (el) => this.onNodeDiscarded(el),
-        onBeforeNodeDiscarded: (el) => {
-          if(el.getAttribute && el.getAttribute(PHX_PRUNE) !== null){ return true }
-          if(el.parentElement !== null && el.id &&
-            DOM.isPhxUpdate(el.parentElement, phxUpdate, [PHX_STREAM, "append", "prepend"])){
-            return false
-          }
-          if(this.maybePendingRemove(el)){ return false }
-          if(this.skipCIDSibling(el)){ return false }
-
-          return true
-        },
-        onElUpdated: (el) => {
-          if(DOM.isNowTriggerFormExternal(el, phxTriggerExternal)){
-            externalFormTriggered = el
-          }
-          updates.push(el)
-          this.maybeReOrderStream(el, false)
-        },
-        onBeforeElUpdated: (fromEl, toEl) => {
-          DOM.maybeAddPrivateHooks(toEl, phxViewportTop, phxViewportBottom)
-          // mark both from and to els as feedback containers, as we don't know yet which one will be used
-          // and we also need to remove the phx-no-feedback class when the phx-feedback-for attribute is removed
-          if(DOM.isFeedbackContainer(fromEl, phxFeedbackFor) || DOM.isFeedbackContainer(toEl, phxFeedbackFor)){
-            feedbackContainers.push(fromEl)
-            feedbackContainers.push(toEl)
-          }
-          DOM.cleanChildNodes(toEl, phxUpdate)
-          if(this.skipCIDSibling(toEl)){
-            // if this is a live component used in a stream, we may need to reorder it
-            this.maybeReOrderStream(fromEl)
-            return false
-          }
-          if(DOM.isPhxSticky(fromEl)){ return false }
-          if(DOM.isIgnored(fromEl, phxUpdate) || (fromEl.form && fromEl.form.isSameNode(externalFormTriggered))){
-            this.trackBefore("updated", fromEl, toEl)
-            DOM.mergeAttrs(fromEl, toEl, {isIgnored: true})
-            updates.push(fromEl)
-            DOM.applyStickyOperations(fromEl)
-            return false
-          }
-          if(fromEl.type === "number" && (fromEl.validity && fromEl.validity.badInput)){ return false }
-          if(!DOM.syncPendingRef(fromEl, toEl, disableWith)){
-            if(DOM.isUploadInput(fromEl)){
-              this.trackBefore("updated", fromEl, toEl)
-              updates.push(fromEl)
+      // console.log(targetContainer.outerHTML)
+      // console.log(source)
+      Idiomorph.morph(targetContainer, source, {
+        // morphStyle: targetContainer.getAttribute(PHX_COMPONENT) === null ? "innerHTML" : "outerHTML",
+        // childrenOnly: targetContainer.getAttribute(PHX_COMPONENT) === null,
+        callbacks: {
+          getNodeKey,
+          beforeAttributeUpdated: (attributeName, node, mutationType) => {
+            if(node.isEqualNode(targetContainer) || node.getAttribute("data-phx-skip-attrs")){ return mutationType !== "remove" }
+            if(attributeName === PHX_STREAM_REF && mutationType === "remove"){ return false }
+          },
+          // skip indexing from children when container is stream
+          // skipFromChildren: (from) => { return from.getAttribute(phxUpdate) === PHX_STREAM },
+          beforeNodeAdded: (el) => {
+            // if(el.nodeName === "SCRIPT") return false
+            DOM.maybeAddPrivateHooks(el, phxViewportTop, phxViewportBottom)
+            this.trackBefore("added", el)
+          },
+          afterNodeAdded: (el) => {
+            // console.log("added", el)
+            let morphedEl = el
+            // this is a stream item that was kept on reset, recursively morph it
+            if(!isJoinPatch && this.streamComponentRestore[el.id]){
+              morphedEl = this.streamComponentRestore[el.id]
+              delete this.streamComponentRestore[el.id]
+              console.log("restoring nested morph", morphedEl.cloneNode(true))
+              morph.bind(this)(morphedEl, el.cloneNode(true))
             }
-            DOM.applyStickyOperations(fromEl)
-            return false
-          }
+            if(this.nodeRestore[getNodeKey(el)]){
+              console.log("restoring el", el)
+              morphedEl = this.nodeRestore[getNodeKey(el)]
+            }
+            el.replaceWith(morphedEl)
+            el = morphedEl
+            // now continue as normal
+            if(el.getAttribute){ this.maybeSetStreamRef(el) }
+            if(DOM.isFeedbackContainer(el, phxFeedbackFor)) feedbackContainers.push(el)
 
-          // nested view handling
-          if(DOM.isPhxChild(toEl)){
-            let prevSession = fromEl.getAttribute(PHX_SESSION)
-            DOM.mergeAttrs(fromEl, toEl, {exclude: [PHX_STATIC]})
-            if(prevSession !== ""){ fromEl.setAttribute(PHX_SESSION, prevSession) }
-            fromEl.setAttribute(PHX_ROOT_ID, this.rootID)
-            DOM.applyStickyOperations(fromEl)
-            return false
-          }
-
-          // input handling
-          DOM.copyPrivates(toEl, fromEl)
-
-          let isFocusedFormEl = focused && fromEl.isSameNode(focused) && DOM.isFormInput(fromEl)
-          // skip patching focused inputs unless focus is a select that has changed options
-          let focusedSelectChanged = isFocusedFormEl && this.isChangedSelect(fromEl, toEl)
-          if(isFocusedFormEl && fromEl.type !== "hidden" && !focusedSelectChanged){
-            this.trackBefore("updated", fromEl, toEl)
-            DOM.mergeFocusedInput(fromEl, toEl)
-            DOM.syncAttrsToProps(fromEl)
-            updates.push(fromEl)
-            DOM.applyStickyOperations(fromEl)
-            return false
-          } else {
-            // blur focused select if it changed so native UI is updated (ie safari won't update visible options)
-            if(focusedSelectChanged){ fromEl.blur() }
-            if(DOM.isPhxUpdate(toEl, phxUpdate, ["append", "prepend"])){
-              appendPrependUpdates.push(new DOMPostMorphRestorer(fromEl, toEl, toEl.getAttribute(phxUpdate)))
+            // hack to fix Safari handling of img srcset and video tags
+            if(el instanceof HTMLImageElement && el.srcset){
+              el.srcset = el.srcset
+            } else if(el instanceof HTMLVideoElement && el.autoplay){
+              el.play()
+            }
+            if(DOM.isNowTriggerFormExternal(el, phxTriggerExternal)){
+              externalFormTriggered = el
             }
 
-            DOM.syncAttrsToProps(toEl)
-            DOM.applyStickyOperations(toEl)
-            this.trackBefore("updated", fromEl, toEl)
+            // nested view handling
+            if((DOM.isPhxChild(el) && view.ownsElement(el)) || DOM.isPhxSticky(el) && view.ownsElement(el.parentNode)){
+              this.trackAfter("phxChildAdded", el)
+            }
+            added.push(el)
+          },
+          afterNodeRemoved: (el) => this.onNodeDiscarded(el),
+          beforeNodeRemoved: (el) => {
+            // console.log("removing", el)
+            if(el.getAttribute && el.getAttribute(PHX_PRUNE) !== null){ return true }
+            if(el.parentElement !== null && el.id &&
+              DOM.isPhxUpdate(el.parentElement, phxUpdate, [PHX_STREAM, "append", "prepend"])){
+              return false
+            }
+            if(this.maybePendingRemove(el)){ return false }
+            if(this.skipCIDSibling(el)){ return false }
+
             return true
+          },
+          afterNodeMorphed: (el) => {
+            // console.log("after morph", el)
+            if(DOM.isNowTriggerFormExternal(el, phxTriggerExternal)){
+              externalFormTriggered = el
+            }
+            updates.push(el)
+            this.maybeSetStreamRef(el)
+          },
+          beforeNodeMorphed: (fromEl, toEl) => {
+            // console.log("before morph", fromEl.cloneNode(true), toEl.cloneNode(true))
+            if(!handleBeforeNodeMorphed.bind(this)(fromEl, toEl) && getNodeKey(fromEl)){
+              this.nodeRestore[getNodeKey(fromEl)] = fromEl.cloneNode(true)
+            }
           }
         }
       })
@@ -350,6 +361,12 @@ export default class DOMPatch {
     return insert || {}
   }
 
+  maybeSetStreamRef(el){
+    let {ref} = this.getStreamInsert(el)
+    if(ref === undefined){ return }
+    this.setStreamRef(el, ref)
+  }
+
   setStreamRef(el, ref){
     DOM.putSticky(el, PHX_STREAM_REF, el => el.setAttribute(PHX_STREAM_REF, ref))
   }
@@ -372,7 +389,9 @@ export default class DOMPatch {
     // reordering does not make sense in that case anyway
     if(!el.parentElement){ return }
 
-    if(streamAt === 0){
+    if(streamAt === -1){
+      el.parentElement.insertAdjacentElement("beforeend", el)
+    } else if(streamAt === 0){
       el.parentElement.insertBefore(el, el.parentElement.firstElementChild)
     } else if(streamAt > 0){
       let children = Array.from(el.parentElement.children)

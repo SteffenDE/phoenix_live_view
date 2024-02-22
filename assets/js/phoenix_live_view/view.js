@@ -560,7 +560,7 @@ export default class View {
       // (as they may have been added back)
       let cids = diff ? this.rendered.componentCIDs(diff) : null
       let [html, streams] = this.rendered.toString(cids)
-      return [`<${tag}>${html}</${tag}>`, streams]
+      return [`<${tag} id="${this.id}" data-phx-skip-attrs>${html}</${tag}>`, streams]
     })
   }
 

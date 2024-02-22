@@ -10,7 +10,7 @@
     "test.watch": "jest --watch"
   },
   "dependencies": {
-    "morphdom": "2.7.2"
+    "idiomorph": "git+https://github.com/SteffenDE/idiomorph.git#nodekey"
   },
   "devDependencies": {
     "@babel/cli": "7.23.4",

@@ -125,7 +125,7 @@ let DOM = {
   },
 
   isIgnored(el, phxUpdate){
-    return (el.getAttribute(phxUpdate) || el.getAttribute("data-phx-update")) === "ignore"
+    return el.getAttribute && (el.getAttribute(phxUpdate) || el.getAttribute("data-phx-update")) === "ignore"
   },
 
   isPhxUpdate(el, phxUpdate, updateTypes){
@@ -494,6 +494,7 @@ let DOM = {
   },
 
   syncPendingRef(fromEl, toEl, disableWith){
+    if(!fromEl.hasAttribute || !toEl.hasAttribute) return true
     let ref = fromEl.getAttribute(PHX_REF)
     if(ref === null){ return true }
     let refSrc = fromEl.getAttribute(PHX_REF_SRC)

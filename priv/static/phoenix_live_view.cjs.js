@@ -1,10 +1,588 @@
+var __create = Object.create;
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __markAsModule = (target) => __defProp(target, "__esModule", { value: true });
+var __commonJS = (cb, mod) => function __require() {
+  return mod || (0, cb[Object.keys(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
 var __export = (target, all) => {
   __markAsModule(target);
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __reExport = (target, module2, desc) => {
+  if (module2 && typeof module2 === "object" || typeof module2 === "function") {
+    for (let key of __getOwnPropNames(module2))
+      if (!__hasOwnProp.call(target, key) && key !== "default")
+        __defProp(target, key, { get: () => module2[key], enumerable: !(desc = __getOwnPropDesc(module2, key)) || desc.enumerable });
+  }
+  return target;
+};
+var __toModule = (module2) => {
+  return __reExport(__markAsModule(__defProp(module2 != null ? __create(__getProtoOf(module2)) : {}, "default", module2 && module2.__esModule && "default" in module2 ? { get: () => module2.default, enumerable: true } : { value: module2, enumerable: true })), module2);
+};
+
+// node_modules/idiomorph/dist/idiomorph.cjs.js
+var require_idiomorph_cjs = __commonJS({
+  "node_modules/idiomorph/dist/idiomorph.cjs.js"(exports, module2) {
+    var Idiomorph2 = function() {
+      "use strict";
+      let EMPTY_SET = new Set();
+      let defaults = {
+        morphStyle: "outerHTML",
+        callbacks: {
+          beforeNodeAdded: noOp,
+          afterNodeAdded: noOp,
+          beforeNodeMorphed: noOp,
+          afterNodeMorphed: noOp,
+          beforeNodeRemoved: noOp,
+          afterNodeRemoved: noOp,
+          beforeAttributeUpdated: noOp,
+          getNodeKey: (node) => node.id
+        },
+        head: {
+          style: "merge",
+          shouldPreserve: function(elt) {
+            return elt.getAttribute("im-preserve") === "true";
+          },
+          shouldReAppend: function(elt) {
+            return elt.getAttribute("im-re-append") === "true";
+          },
+          shouldRemove: noOp,
+          afterHeadMorphed: noOp
+        }
+      };
+      function morph(oldNode, newContent, config = {}) {
+        if (oldNode instanceof Document) {
+          oldNode = oldNode.documentElement;
+        }
+        if (typeof newContent === "string") {
+          newContent = parseContent(newContent);
+        }
+        let normalizedContent = normalizeContent(newContent);
+        let ctx = createMorphContext(oldNode, normalizedContent, config);
+        return morphNormalizedContent(oldNode, normalizedContent, ctx);
+      }
+      function morphNormalizedContent(oldNode, normalizedNewContent, ctx) {
+        if (ctx.head.block) {
+          let oldHead = oldNode.querySelector("head");
+          let newHead = normalizedNewContent.querySelector("head");
+          if (oldHead && newHead) {
+            let promises = handleHeadElement(newHead, oldHead, ctx);
+            Promise.all(promises).then(function() {
+              morphNormalizedContent(oldNode, normalizedNewContent, Object.assign(ctx, {
+                head: {
+                  block: false,
+                  ignore: true
+                }
+              }));
+            });
+            return;
+          }
+        }
+        if (ctx.morphStyle === "innerHTML") {
+          morphChildren(normalizedNewContent, oldNode, ctx);
+          return oldNode.children;
+        } else if (ctx.morphStyle === "outerHTML" || ctx.morphStyle == null) {
+          let bestMatch = findBestNodeMatch(normalizedNewContent, oldNode, ctx);
+          let previousSibling = bestMatch?.previousSibling;
+          let nextSibling = bestMatch?.nextSibling;
+          let morphedNode = morphOldNodeTo(oldNode, bestMatch, ctx);
+          if (bestMatch) {
+            return insertSiblings(previousSibling, morphedNode, nextSibling);
+          } else {
+            return [];
+          }
+        } else {
+          throw "Do not understand how to morph style " + ctx.morphStyle;
+        }
+      }
+      function ignoreValueOfActiveElement(possibleActiveElement, ctx) {
+        return ctx.ignoreActiveValue && possibleActiveElement === document.activeElement && possibleActiveElement !== document.body;
+      }
+      function morphOldNodeTo(oldNode, newContent, ctx) {
+        if (ctx.ignoreActive && oldNode === document.activeElement) {
+        } else if (newContent == null) {
+          if (ctx.callbacks.beforeNodeRemoved(oldNode) === false)
+            return oldNode;
+          oldNode.remove();
+          ctx.callbacks.afterNodeRemoved(oldNode);
+          return null;
+        } else if (!isSoftMatch(oldNode, newContent)) {
+          if (ctx.callbacks.beforeNodeRemoved(oldNode) === false)
+            return oldNode;
+          if (ctx.callbacks.beforeNodeAdded(newContent) === false)
+            return oldNode;
+          oldNode.parentElement.replaceChild(newContent, oldNode);
+          ctx.callbacks.afterNodeAdded(newContent);
+          ctx.callbacks.afterNodeRemoved(oldNode);
+          return newContent;
+        } else {
+          if (ctx.callbacks.beforeNodeMorphed(oldNode, newContent) === false)
+            return oldNode;
+          if (oldNode instanceof HTMLHeadElement && ctx.head.ignore) {
+          } else if (oldNode instanceof HTMLHeadElement && ctx.head.style !== "morph") {
+            handleHeadElement(newContent, oldNode, ctx);
+          } else {
+            syncNodeFrom(newContent, oldNode, ctx);
+            if (!ignoreValueOfActiveElement(oldNode, ctx)) {
+              morphChildren(newContent, oldNode, ctx);
+            }
+          }
+          ctx.callbacks.afterNodeMorphed(oldNode, newContent);
+          return oldNode;
+        }
+      }
+      function morphChildren(newParent, oldParent, ctx) {
+        let nextNewChild = newParent.firstChild;
+        let insertionPoint = oldParent.firstChild;
+        let newChild;
+        while (nextNewChild) {
+          newChild = nextNewChild;
+          nextNewChild = newChild.nextSibling;
+          if (insertionPoint == null) {
+            if (ctx.callbacks.beforeNodeAdded(newChild) === false)
+              return;
+            oldParent.appendChild(newChild);
+            ctx.callbacks.afterNodeAdded(newChild);
+            removeIdsFromConsideration(ctx, newChild);
+            continue;
+          }
+          if (isIdSetMatch(newChild, insertionPoint, ctx)) {
+            morphOldNodeTo(insertionPoint, newChild, ctx);
+            insertionPoint = insertionPoint.nextSibling;
+            removeIdsFromConsideration(ctx, newChild);
+            continue;
+          }
+          let idSetMatch = findIdSetMatch(newParent, oldParent, newChild, insertionPoint, ctx);
+          if (idSetMatch) {
+            insertionPoint = removeNodesBetween(insertionPoint, idSetMatch, ctx);
+            morphOldNodeTo(idSetMatch, newChild, ctx);
+            removeIdsFromConsideration(ctx, newChild);
+            continue;
+          }
+          let softMatch = findSoftMatch(newParent, oldParent, newChild, insertionPoint, ctx);
+          if (softMatch) {
+            insertionPoint = removeNodesBetween(insertionPoint, softMatch, ctx);
+            morphOldNodeTo(softMatch, newChild, ctx);
+            removeIdsFromConsideration(ctx, newChild);
+            continue;
+          }
+          if (ctx.callbacks.beforeNodeAdded(newChild) === false)
+            return;
+          oldParent.insertBefore(newChild, insertionPoint);
+          ctx.callbacks.afterNodeAdded(newChild);
+          removeIdsFromConsideration(ctx, newChild);
+        }
+        while (insertionPoint !== null) {
+          let tempNode = insertionPoint;
+          insertionPoint = insertionPoint.nextSibling;
+          removeNode(tempNode, ctx);
+        }
+      }
+      function ignoreAttribute(attr, to, updateType, ctx) {
+        if (attr === "value" && ctx.ignoreActiveValue && to === document.activeElement) {
+          return true;
+        }
+        return ctx.callbacks.beforeAttributeUpdated(attr, to, updateType) === false;
+      }
+      function syncNodeFrom(from, to, ctx) {
+        let type = from.nodeType;
+        if (type === 1) {
+          const fromAttributes = from.attributes;
+          const toAttributes = to.attributes;
+          for (const fromAttribute of fromAttributes) {
+            if (ignoreAttribute(fromAttribute.name, to, "update", ctx)) {
+              continue;
+            }
+            if (to.getAttribute(fromAttribute.name) !== fromAttribute.value) {
+              to.setAttribute(fromAttribute.name, fromAttribute.value);
+            }
+          }
+          for (let i = toAttributes.length - 1; 0 <= i; i--) {
+            const toAttribute = toAttributes[i];
+            if (ignoreAttribute(toAttribute.name, to, "remove", ctx)) {
+              continue;
+            }
+            if (!from.hasAttribute(toAttribute.name)) {
+              to.removeAttribute(toAttribute.name);
+            }
+          }
+        }
+        if (type === 8 || type === 3) {
+          if (to.nodeValue !== from.nodeValue) {
+            to.nodeValue = from.nodeValue;
+          }
+        }
+        if (!ignoreValueOfActiveElement(to, ctx)) {
+          syncInputValue(from, to, ctx);
+        }
+      }
+      function syncBooleanAttribute(from, to, attributeName, ctx) {
+        if (from[attributeName] !== to[attributeName]) {
+          let ignoreUpdate = ignoreAttribute(attributeName, to, "update", ctx);
+          if (!ignoreUpdate) {
+            to[attributeName] = from[attributeName];
+          }
+          if (from[attributeName]) {
+            if (!ignoreUpdate) {
+              to.setAttribute(attributeName, from[attributeName]);
+            }
+          } else {
+            if (!ignoreAttribute(attributeName, to, "remove", ctx)) {
+              to.removeAttribute(attributeName);
+            }
+          }
+        }
+      }
+      function syncInputValue(from, to, ctx) {
+        if (from instanceof HTMLInputElement && to instanceof HTMLInputElement && from.type !== "file") {
+          let fromValue = from.value;
+          let toValue = to.value;
+          syncBooleanAttribute(from, to, "checked", ctx);
+          syncBooleanAttribute(from, to, "disabled", ctx);
+          if (!from.hasAttribute("value")) {
+            if (!ignoreAttribute("value", to, "remove", ctx)) {
+              to.value = "";
+              to.removeAttribute("value");
+            }
+          } else if (fromValue !== toValue) {
+            if (!ignoreAttribute("value", to, "update", ctx)) {
+              to.setAttribute("value", fromValue);
+              to.value = fromValue;
+            }
+          }
+        } else if (from instanceof HTMLOptionElement) {
+          syncBooleanAttribute(from, to, "selected", ctx);
+        } else if (from instanceof HTMLTextAreaElement && to instanceof HTMLTextAreaElement) {
+          let fromValue = from.value;
+          let toValue = to.value;
+          if (ignoreAttribute("value", to, "update", ctx)) {
+            return;
+          }
+          if (fromValue !== toValue) {
+            to.value = fromValue;
+          }
+          if (to.firstChild && to.firstChild.nodeValue !== fromValue) {
+            to.firstChild.nodeValue = fromValue;
+          }
+        }
+      }
+      function handleHeadElement(newHeadTag, currentHead, ctx) {
+        let added = [];
+        let removed = [];
+        let preserved = [];
+        let nodesToAppend = [];
+        let headMergeStyle = ctx.head.style;
+        let srcToNewHeadNodes = new Map();
+        for (const newHeadChild of newHeadTag.children) {
+          srcToNewHeadNodes.set(newHeadChild.outerHTML, newHeadChild);
+        }
+        for (const currentHeadElt of currentHead.children) {
+          let inNewContent = srcToNewHeadNodes.has(currentHeadElt.outerHTML);
+          let isReAppended = ctx.head.shouldReAppend(currentHeadElt);
+          let isPreserved = ctx.head.shouldPreserve(currentHeadElt);
+          if (inNewContent || isPreserved) {
+            if (isReAppended) {
+              removed.push(currentHeadElt);
+            } else {
+              srcToNewHeadNodes.delete(currentHeadElt.outerHTML);
+              preserved.push(currentHeadElt);
+            }
+          } else {
+            if (headMergeStyle === "append") {
+              if (isReAppended) {
+                removed.push(currentHeadElt);
+                nodesToAppend.push(currentHeadElt);
+              }
+            } else {
+              if (ctx.head.shouldRemove(currentHeadElt) !== false) {
+                removed.push(currentHeadElt);
+              }
+            }
+          }
+        }
+        nodesToAppend.push(...srcToNewHeadNodes.values());
+        log("to append: ", nodesToAppend);
+        let promises = [];
+        for (const newNode of nodesToAppend) {
+          log("adding: ", newNode);
+          let newElt = document.createRange().createContextualFragment(newNode.outerHTML).firstChild;
+          log(newElt);
+          if (ctx.callbacks.beforeNodeAdded(newElt) !== false) {
+            if (newElt.href || newElt.src) {
+              let resolve = null;
+              let promise = new Promise(function(_resolve) {
+                resolve = _resolve;
+              });
+              newElt.addEventListener("load", function() {
+                resolve();
+              });
+              promises.push(promise);
+            }
+            currentHead.appendChild(newElt);
+            ctx.callbacks.afterNodeAdded(newElt);
+            added.push(newElt);
+          }
+        }
+        for (const removedElement of removed) {
+          if (ctx.callbacks.beforeNodeRemoved(removedElement) !== false) {
+            currentHead.removeChild(removedElement);
+            ctx.callbacks.afterNodeRemoved(removedElement);
+          }
+        }
+        ctx.head.afterHeadMorphed(currentHead, { added, kept: preserved, removed });
+        return promises;
+      }
+      function log() {
+      }
+      function noOp() {
+      }
+      function mergeDefaults(config) {
+        let finalConfig = {};
+        Object.assign(finalConfig, defaults);
+        Object.assign(finalConfig, config);
+        finalConfig.callbacks = {};
+        Object.assign(finalConfig.callbacks, defaults.callbacks);
+        Object.assign(finalConfig.callbacks, config.callbacks);
+        finalConfig.head = {};
+        Object.assign(finalConfig.head, defaults.head);
+        Object.assign(finalConfig.head, config.head);
+        return finalConfig;
+      }
+      function createMorphContext(oldNode, newContent, config) {
+        config = mergeDefaults(config);
+        return {
+          target: oldNode,
+          newContent,
+          config,
+          morphStyle: config.morphStyle,
+          ignoreActive: config.ignoreActive,
+          ignoreActiveValue: config.ignoreActiveValue,
+          idMap: createIdMap(oldNode, newContent, config.callbacks.getNodeKey),
+          deadIds: new Set(),
+          callbacks: config.callbacks,
+          head: config.head
+        };
+      }
+      function isIdSetMatch(node1, node2, ctx) {
+        if (node1 == null || node2 == null) {
+          return false;
+        }
+        if (node1.nodeType === node2.nodeType && node1.tagName === node2.tagName) {
+          if (ctx.callbacks.getNodeKey(node1) !== "" && ctx.callbacks.getNodeKey(node1) === ctx.callbacks.getNodeKey(node2)) {
+            return true;
+          } else {
+            return getIdIntersectionCount(ctx, node1, node2) > 0;
+          }
+        }
+        return false;
+      }
+      function isSoftMatch(node1, node2) {
+        if (node1 == null || node2 == null) {
+          return false;
+        }
+        return node1.nodeType === node2.nodeType && node1.tagName === node2.tagName;
+      }
+      function removeNodesBetween(startInclusive, endExclusive, ctx) {
+        while (startInclusive !== endExclusive) {
+          let tempNode = startInclusive;
+          startInclusive = startInclusive.nextSibling;
+          removeNode(tempNode, ctx);
+        }
+        removeIdsFromConsideration(ctx, endExclusive);
+        return endExclusive.nextSibling;
+      }
+      function findIdSetMatch(newContent, oldParent, newChild, insertionPoint, ctx) {
+        let newChildPotentialIdCount = getIdIntersectionCount(ctx, newChild, oldParent);
+        let potentialMatch = null;
+        if (newChildPotentialIdCount > 0) {
+          let potentialMatch2 = insertionPoint;
+          let otherMatchCount = 0;
+          while (potentialMatch2 != null) {
+            if (isIdSetMatch(newChild, potentialMatch2, ctx)) {
+              return potentialMatch2;
+            }
+            otherMatchCount += getIdIntersectionCount(ctx, potentialMatch2, newContent);
+            if (otherMatchCount > newChildPotentialIdCount) {
+              return null;
+            }
+            potentialMatch2 = potentialMatch2.nextSibling;
+          }
+        }
+        return potentialMatch;
+      }
+      function findSoftMatch(newContent, oldParent, newChild, insertionPoint, ctx) {
+        let potentialSoftMatch = insertionPoint;
+        let nextSibling = newChild.nextSibling;
+        let siblingSoftMatchCount = 0;
+        while (potentialSoftMatch != null) {
+          if (getIdIntersectionCount(ctx, potentialSoftMatch, newContent) > 0) {
+            return null;
+          }
+          if (isSoftMatch(newChild, potentialSoftMatch)) {
+            return potentialSoftMatch;
+          }
+          if (isSoftMatch(nextSibling, potentialSoftMatch)) {
+            siblingSoftMatchCount++;
+            nextSibling = nextSibling.nextSibling;
+            if (siblingSoftMatchCount >= 2) {
+              return null;
+            }
+          }
+          potentialSoftMatch = potentialSoftMatch.nextSibling;
+        }
+        return potentialSoftMatch;
+      }
+      function parseContent(newContent) {
+        let parser = new DOMParser();
+        let contentWithSvgsRemoved = newContent.replace(/<svg(\s[^>]*>|>)([\s\S]*?)<\/svg>/gim, "");
+        if (contentWithSvgsRemoved.match(/<\/html>/) || contentWithSvgsRemoved.match(/<\/head>/) || contentWithSvgsRemoved.match(/<\/body>/)) {
+          let content = parser.parseFromString(newContent, "text/html");
+          if (contentWithSvgsRemoved.match(/<\/html>/)) {
+            content.generatedByIdiomorph = true;
+            return content;
+          } else {
+            let htmlElement = content.firstChild;
+            if (htmlElement) {
+              htmlElement.generatedByIdiomorph = true;
+              return htmlElement;
+            } else {
+              return null;
+            }
+          }
+        } else {
+          let responseDoc = parser.parseFromString("<body><template>" + newContent + "</template></body>", "text/html");
+          let content = responseDoc.body.querySelector("template").content;
+          content.generatedByIdiomorph = true;
+          return content;
+        }
+      }
+      function normalizeContent(newContent) {
+        if (newContent == null) {
+          const dummyParent = document.createElement("div");
+          return dummyParent;
+        } else if (newContent.generatedByIdiomorph) {
+          return newContent;
+        } else if (newContent instanceof Node) {
+          const dummyParent = document.createElement("div");
+          dummyParent.append(newContent);
+          return dummyParent;
+        } else {
+          const dummyParent = document.createElement("div");
+          for (const elt of [...newContent]) {
+            dummyParent.append(elt);
+          }
+          return dummyParent;
+        }
+      }
+      function insertSiblings(previousSibling, morphedNode, nextSibling) {
+        let stack = [];
+        let added = [];
+        while (previousSibling != null) {
+          stack.push(previousSibling);
+          previousSibling = previousSibling.previousSibling;
+        }
+        while (stack.length > 0) {
+          let node = stack.pop();
+          added.push(node);
+          morphedNode.parentElement.insertBefore(node, morphedNode);
+        }
+        added.push(morphedNode);
+        while (nextSibling != null) {
+          stack.push(nextSibling);
+          added.push(nextSibling);
+          nextSibling = nextSibling.nextSibling;
+        }
+        while (stack.length > 0) {
+          morphedNode.parentElement.insertBefore(stack.pop(), morphedNode.nextSibling);
+        }
+        return added;
+      }
+      function findBestNodeMatch(newContent, oldNode, ctx) {
+        let currentElement;
+        currentElement = newContent.firstChild;
+        let bestElement = currentElement;
+        let score = 0;
+        while (currentElement) {
+          let newScore = scoreElement(currentElement, oldNode, ctx);
+          if (newScore > score) {
+            bestElement = currentElement;
+            score = newScore;
+          }
+          currentElement = currentElement.nextSibling;
+        }
+        return bestElement;
+      }
+      function scoreElement(node1, node2, ctx) {
+        if (isSoftMatch(node1, node2)) {
+          return 0.5 + getIdIntersectionCount(ctx, node1, node2);
+        }
+        return 0;
+      }
+      function removeNode(tempNode, ctx) {
+        removeIdsFromConsideration(ctx, tempNode);
+        if (ctx.callbacks.beforeNodeRemoved(tempNode) === false)
+          return;
+        tempNode.remove();
+        ctx.callbacks.afterNodeRemoved(tempNode);
+      }
+      function isIdInConsideration(ctx, id) {
+        return !ctx.deadIds.has(id);
+      }
+      function idIsWithinNode(ctx, id, targetNode) {
+        let idSet = ctx.idMap.get(targetNode) || EMPTY_SET;
+        return idSet.has(id);
+      }
+      function removeIdsFromConsideration(ctx, node) {
+        let idSet = ctx.idMap.get(node) || EMPTY_SET;
+        for (const id of idSet) {
+          ctx.deadIds.add(id);
+        }
+      }
+      function getIdIntersectionCount(ctx, node1, node2) {
+        let sourceSet = ctx.idMap.get(node1) || EMPTY_SET;
+        let matchCount = 0;
+        for (const id of sourceSet) {
+          if (isIdInConsideration(ctx, id) && idIsWithinNode(ctx, id, node2)) {
+            ++matchCount;
+          }
+        }
+        return matchCount;
+      }
+      function populateIdMapForNode(node, idMap, getNodeKey) {
+        let nodeParent = node.parentElement;
+        let idElements = node.querySelectorAll("[id]");
+        for (const elt of idElements) {
+          let current = elt;
+          while (current !== nodeParent && current != null) {
+            let idSet = idMap.get(current);
+            if (idSet == null) {
+              idSet = new Set();
+              idMap.set(current, idSet);
+            }
+            idSet.add(getNodeKey(elt));
+            current = current.parentElement;
+          }
+        }
+      }
+      function createIdMap(oldContent, newContent, getNodeKey) {
+        let idMap = new Map();
+        populateIdMapForNode(oldContent, idMap, getNodeKey);
+        populateIdMapForNode(newContent, idMap, getNodeKey);
+        return idMap;
+      }
+      return {
+        morph,
+        defaults
+      };
+    }();
+    module2.exports = Idiomorph2;
+  }
+});
 
 // js/phoenix_live_view/index.js
 __export(exports, {
@@ -689,7 +1267,7 @@ var DOM = {
     return this.findPhxChildren(template.content, parentId);
   },
   isIgnored(el, phxUpdate) {
-    return (el.getAttribute(phxUpdate) || el.getAttribute("data-phx-update")) === "ignore";
+    return el.getAttribute && (el.getAttribute(phxUpdate) || el.getAttribute("data-phx-update")) === "ignore";
   },
   isPhxUpdate(el, phxUpdate, updateTypes) {
     return el.getAttribute && updateTypes.indexOf(el.getAttribute(phxUpdate)) >= 0;
@@ -1030,6 +1608,8 @@ var DOM = {
     return el.getAttribute && el.getAttribute(phxTriggerExternal) !== null;
   },
   syncPendingRef(fromEl, toEl, disableWith) {
+    if (!fromEl.hasAttribute || !toEl.hasAttribute)
+      return true;
     let ref = fromEl.getAttribute(PHX_REF);
     if (ref === null) {
       return true;
@@ -1585,500 +2165,25 @@ var DOMPostMorphRestorer = class {
         maybe(document.getElementById(elemId), (elem) => container.insertAdjacentElement("afterbegin", elem));
       });
     }
-  }
-};
-
-// node_modules/morphdom/dist/morphdom-esm.js
-var DOCUMENT_FRAGMENT_NODE = 11;
-function morphAttrs(fromNode, toNode) {
-  var toNodeAttrs = toNode.attributes;
-  var attr;
-  var attrName;
-  var attrNamespaceURI;
-  var attrValue;
-  var fromValue;
-  if (toNode.nodeType === DOCUMENT_FRAGMENT_NODE || fromNode.nodeType === DOCUMENT_FRAGMENT_NODE) {
-    return;
-  }
-  for (var i = toNodeAttrs.length - 1; i >= 0; i--) {
-    attr = toNodeAttrs[i];
-    attrName = attr.name;
-    attrNamespaceURI = attr.namespaceURI;
-    attrValue = attr.value;
-    if (attrNamespaceURI) {
-      attrName = attr.localName || attrName;
-      fromValue = fromNode.getAttributeNS(attrNamespaceURI, attrName);
-      if (fromValue !== attrValue) {
-        if (attr.prefix === "xmlns") {
-          attrName = attr.name;
-        }
-        fromNode.setAttributeNS(attrNamespaceURI, attrName, attrValue);
-      }
-    } else {
-      fromValue = fromNode.getAttribute(attrName);
-      if (fromValue !== attrValue) {
-        fromNode.setAttribute(attrName, attrValue);
-      }
-    }
-  }
-  var fromNodeAttrs = fromNode.attributes;
-  for (var d = fromNodeAttrs.length - 1; d >= 0; d--) {
-    attr = fromNodeAttrs[d];
-    attrName = attr.name;
-    attrNamespaceURI = attr.namespaceURI;
-    if (attrNamespaceURI) {
-      attrName = attr.localName || attrName;
-      if (!toNode.hasAttributeNS(attrNamespaceURI, attrName)) {
-        fromNode.removeAttributeNS(attrNamespaceURI, attrName);
-      }
-    } else {
-      if (!toNode.hasAttribute(attrName)) {
-        fromNode.removeAttribute(attrName);
-      }
-    }
-  }
-}
-var range;
-var NS_XHTML = "http://www.w3.org/1999/xhtml";
-var doc = typeof document === "undefined" ? void 0 : document;
-var HAS_TEMPLATE_SUPPORT = !!doc && "content" in doc.createElement("template");
-var HAS_RANGE_SUPPORT = !!doc && doc.createRange && "createContextualFragment" in doc.createRange();
-function createFragmentFromTemplate(str) {
-  var template = doc.createElement("template");
-  template.innerHTML = str;
-  return template.content.childNodes[0];
-}
-function createFragmentFromRange(str) {
-  if (!range) {
-    range = doc.createRange();
-    range.selectNode(doc.body);
-  }
-  var fragment = range.createContextualFragment(str);
-  return fragment.childNodes[0];
-}
-function createFragmentFromWrap(str) {
-  var fragment = doc.createElement("body");
-  fragment.innerHTML = str;
-  return fragment.childNodes[0];
-}
-function toElement(str) {
-  str = str.trim();
-  if (HAS_TEMPLATE_SUPPORT) {
-    return createFragmentFromTemplate(str);
-  } else if (HAS_RANGE_SUPPORT) {
-    return createFragmentFromRange(str);
-  }
-  return createFragmentFromWrap(str);
-}
-function compareNodeNames(fromEl, toEl) {
-  var fromNodeName = fromEl.nodeName;
-  var toNodeName = toEl.nodeName;
-  var fromCodeStart, toCodeStart;
-  if (fromNodeName === toNodeName) {
-    return true;
-  }
-  fromCodeStart = fromNodeName.charCodeAt(0);
-  toCodeStart = toNodeName.charCodeAt(0);
-  if (fromCodeStart <= 90 && toCodeStart >= 97) {
-    return fromNodeName === toNodeName.toUpperCase();
-  } else if (toCodeStart <= 90 && fromCodeStart >= 97) {
-    return toNodeName === fromNodeName.toUpperCase();
-  } else {
-    return false;
-  }
-}
-function createElementNS(name, namespaceURI) {
-  return !namespaceURI || namespaceURI === NS_XHTML ? doc.createElement(name) : doc.createElementNS(namespaceURI, name);
-}
-function moveChildren(fromEl, toEl) {
-  var curChild = fromEl.firstChild;
-  while (curChild) {
-    var nextChild = curChild.nextSibling;
-    toEl.appendChild(curChild);
-    curChild = nextChild;
-  }
-  return toEl;
-}
-function syncBooleanAttrProp(fromEl, toEl, name) {
-  if (fromEl[name] !== toEl[name]) {
-    fromEl[name] = toEl[name];
-    if (fromEl[name]) {
-      fromEl.setAttribute(name, "");
-    } else {
-      fromEl.removeAttribute(name);
-    }
-  }
-}
-var specialElHandlers = {
-  OPTION: function(fromEl, toEl) {
-    var parentNode = fromEl.parentNode;
-    if (parentNode) {
-      var parentName = parentNode.nodeName.toUpperCase();
-      if (parentName === "OPTGROUP") {
-        parentNode = parentNode.parentNode;
-        parentName = parentNode && parentNode.nodeName.toUpperCase();
-      }
-      if (parentName === "SELECT" && !parentNode.hasAttribute("multiple")) {
-        if (fromEl.hasAttribute("selected") && !toEl.selected) {
-          fromEl.setAttribute("selected", "selected");
-          fromEl.removeAttribute("selected");
-        }
-        parentNode.selectedIndex = -1;
-      }
-    }
-    syncBooleanAttrProp(fromEl, toEl, "selected");
-  },
-  INPUT: function(fromEl, toEl) {
-    syncBooleanAttrProp(fromEl, toEl, "checked");
-    syncBooleanAttrProp(fromEl, toEl, "disabled");
-    if (fromEl.value !== toEl.value) {
-      fromEl.value = toEl.value;
-    }
-    if (!toEl.hasAttribute("value")) {
-      fromEl.removeAttribute("value");
-    }
-  },
-  TEXTAREA: function(fromEl, toEl) {
-    var newValue = toEl.value;
-    if (fromEl.value !== newValue) {
-      fromEl.value = newValue;
-    }
-    var firstChild = fromEl.firstChild;
-    if (firstChild) {
-      var oldValue = firstChild.nodeValue;
-      if (oldValue == newValue || !newValue && oldValue == fromEl.placeholder) {
-        return;
-      }
-      firstChild.nodeValue = newValue;
-    }
-  },
-  SELECT: function(fromEl, toEl) {
-    if (!toEl.hasAttribute("multiple")) {
-      var selectedIndex = -1;
-      var i = 0;
-      var curChild = fromEl.firstChild;
-      var optgroup;
-      var nodeName;
-      while (curChild) {
-        nodeName = curChild.nodeName && curChild.nodeName.toUpperCase();
-        if (nodeName === "OPTGROUP") {
-          optgroup = curChild;
-          curChild = optgroup.firstChild;
-        } else {
-          if (nodeName === "OPTION") {
-            if (curChild.hasAttribute("selected")) {
-              selectedIndex = i;
-              break;
-            }
-            i++;
-          }
-          curChild = curChild.nextSibling;
-          if (!curChild && optgroup) {
-            curChild = optgroup.nextSibling;
-            optgroup = null;
-          }
-        }
-      }
-      fromEl.selectedIndex = selectedIndex;
+    if (this.updateType == "append") {
+      this.elementIdsToAdd.forEach((elemId) => {
+        maybe(document.getElementById(elemId), (elem) => container.insertAdjacentElement("beforeend", elem));
+      });
     }
   }
 };
-var ELEMENT_NODE = 1;
-var DOCUMENT_FRAGMENT_NODE$1 = 11;
-var TEXT_NODE = 3;
-var COMMENT_NODE = 8;
-function noop() {
-}
-function defaultGetNodeKey(node) {
-  if (node) {
-    return node.getAttribute && node.getAttribute("id") || node.id;
-  }
-}
-function morphdomFactory(morphAttrs2) {
-  return function morphdom2(fromNode, toNode, options) {
-    if (!options) {
-      options = {};
-    }
-    if (typeof toNode === "string") {
-      if (fromNode.nodeName === "#document" || fromNode.nodeName === "HTML" || fromNode.nodeName === "BODY") {
-        var toNodeHtml = toNode;
-        toNode = doc.createElement("html");
-        toNode.innerHTML = toNodeHtml;
-      } else {
-        toNode = toElement(toNode);
-      }
-    } else if (toNode.nodeType === DOCUMENT_FRAGMENT_NODE$1) {
-      toNode = toNode.firstElementChild;
-    }
-    var getNodeKey = options.getNodeKey || defaultGetNodeKey;
-    var onBeforeNodeAdded = options.onBeforeNodeAdded || noop;
-    var onNodeAdded = options.onNodeAdded || noop;
-    var onBeforeElUpdated = options.onBeforeElUpdated || noop;
-    var onElUpdated = options.onElUpdated || noop;
-    var onBeforeNodeDiscarded = options.onBeforeNodeDiscarded || noop;
-    var onNodeDiscarded = options.onNodeDiscarded || noop;
-    var onBeforeElChildrenUpdated = options.onBeforeElChildrenUpdated || noop;
-    var skipFromChildren = options.skipFromChildren || noop;
-    var addChild = options.addChild || function(parent, child) {
-      return parent.appendChild(child);
-    };
-    var childrenOnly = options.childrenOnly === true;
-    var fromNodesLookup = Object.create(null);
-    var keyedRemovalList = [];
-    function addKeyedRemoval(key) {
-      keyedRemovalList.push(key);
-    }
-    function walkDiscardedChildNodes(node, skipKeyedNodes) {
-      if (node.nodeType === ELEMENT_NODE) {
-        var curChild = node.firstChild;
-        while (curChild) {
-          var key = void 0;
-          if (skipKeyedNodes && (key = getNodeKey(curChild))) {
-            addKeyedRemoval(key);
-          } else {
-            onNodeDiscarded(curChild);
-            if (curChild.firstChild) {
-              walkDiscardedChildNodes(curChild, skipKeyedNodes);
-            }
-          }
-          curChild = curChild.nextSibling;
-        }
-      }
-    }
-    function removeNode(node, parentNode, skipKeyedNodes) {
-      if (onBeforeNodeDiscarded(node) === false) {
-        return;
-      }
-      if (parentNode) {
-        parentNode.removeChild(node);
-      }
-      onNodeDiscarded(node);
-      walkDiscardedChildNodes(node, skipKeyedNodes);
-    }
-    function indexTree(node) {
-      if (node.nodeType === ELEMENT_NODE || node.nodeType === DOCUMENT_FRAGMENT_NODE$1) {
-        var curChild = node.firstChild;
-        while (curChild) {
-          var key = getNodeKey(curChild);
-          if (key) {
-            fromNodesLookup[key] = curChild;
-          }
-          indexTree(curChild);
-          curChild = curChild.nextSibling;
-        }
-      }
-    }
-    indexTree(fromNode);
-    function handleNodeAdded(el) {
-      onNodeAdded(el);
-      var curChild = el.firstChild;
-      while (curChild) {
-        var nextSibling = curChild.nextSibling;
-        var key = getNodeKey(curChild);
-        if (key) {
-          var unmatchedFromEl = fromNodesLookup[key];
-          if (unmatchedFromEl && compareNodeNames(curChild, unmatchedFromEl)) {
-            curChild.parentNode.replaceChild(unmatchedFromEl, curChild);
-            morphEl(unmatchedFromEl, curChild);
-          } else {
-            handleNodeAdded(curChild);
-          }
-        } else {
-          handleNodeAdded(curChild);
-        }
-        curChild = nextSibling;
-      }
-    }
-    function cleanupFromEl(fromEl, curFromNodeChild, curFromNodeKey) {
-      while (curFromNodeChild) {
-        var fromNextSibling = curFromNodeChild.nextSibling;
-        if (curFromNodeKey = getNodeKey(curFromNodeChild)) {
-          addKeyedRemoval(curFromNodeKey);
-        } else {
-          removeNode(curFromNodeChild, fromEl, true);
-        }
-        curFromNodeChild = fromNextSibling;
-      }
-    }
-    function morphEl(fromEl, toEl, childrenOnly2) {
-      var toElKey = getNodeKey(toEl);
-      if (toElKey) {
-        delete fromNodesLookup[toElKey];
-      }
-      if (!childrenOnly2) {
-        if (onBeforeElUpdated(fromEl, toEl) === false) {
-          return;
-        }
-        morphAttrs2(fromEl, toEl);
-        onElUpdated(fromEl);
-        if (onBeforeElChildrenUpdated(fromEl, toEl) === false) {
-          return;
-        }
-      }
-      if (fromEl.nodeName !== "TEXTAREA") {
-        morphChildren(fromEl, toEl);
-      } else {
-        specialElHandlers.TEXTAREA(fromEl, toEl);
-      }
-    }
-    function morphChildren(fromEl, toEl) {
-      var skipFrom = skipFromChildren(fromEl, toEl);
-      var curToNodeChild = toEl.firstChild;
-      var curFromNodeChild = fromEl.firstChild;
-      var curToNodeKey;
-      var curFromNodeKey;
-      var fromNextSibling;
-      var toNextSibling;
-      var matchingFromEl;
-      outer:
-        while (curToNodeChild) {
-          toNextSibling = curToNodeChild.nextSibling;
-          curToNodeKey = getNodeKey(curToNodeChild);
-          while (!skipFrom && curFromNodeChild) {
-            fromNextSibling = curFromNodeChild.nextSibling;
-            if (curToNodeChild.isSameNode && curToNodeChild.isSameNode(curFromNodeChild)) {
-              curToNodeChild = toNextSibling;
-              curFromNodeChild = fromNextSibling;
-              continue outer;
-            }
-            curFromNodeKey = getNodeKey(curFromNodeChild);
-            var curFromNodeType = curFromNodeChild.nodeType;
-            var isCompatible = void 0;
-            if (curFromNodeType === curToNodeChild.nodeType) {
-              if (curFromNodeType === ELEMENT_NODE) {
-                if (curToNodeKey) {
-                  if (curToNodeKey !== curFromNodeKey) {
-                    if (matchingFromEl = fromNodesLookup[curToNodeKey]) {
-                      if (fromNextSibling === matchingFromEl) {
-                        isCompatible = false;
-                      } else {
-                        fromEl.insertBefore(matchingFromEl, curFromNodeChild);
-                        if (curFromNodeKey) {
-                          addKeyedRemoval(curFromNodeKey);
-                        } else {
-                          removeNode(curFromNodeChild, fromEl, true);
-                        }
-                        curFromNodeChild = matchingFromEl;
-                        curFromNodeKey = getNodeKey(curFromNodeChild);
-                      }
-                    } else {
-                      isCompatible = false;
-                    }
-                  }
-                } else if (curFromNodeKey) {
-                  isCompatible = false;
-                }
-                isCompatible = isCompatible !== false && compareNodeNames(curFromNodeChild, curToNodeChild);
-                if (isCompatible) {
-                  morphEl(curFromNodeChild, curToNodeChild);
-                }
-              } else if (curFromNodeType === TEXT_NODE || curFromNodeType == COMMENT_NODE) {
-                isCompatible = true;
-                if (curFromNodeChild.nodeValue !== curToNodeChild.nodeValue) {
-                  curFromNodeChild.nodeValue = curToNodeChild.nodeValue;
-                }
-              }
-            }
-            if (isCompatible) {
-              curToNodeChild = toNextSibling;
-              curFromNodeChild = fromNextSibling;
-              continue outer;
-            }
-            if (curFromNodeKey) {
-              addKeyedRemoval(curFromNodeKey);
-            } else {
-              removeNode(curFromNodeChild, fromEl, true);
-            }
-            curFromNodeChild = fromNextSibling;
-          }
-          if (curToNodeKey && (matchingFromEl = fromNodesLookup[curToNodeKey]) && compareNodeNames(matchingFromEl, curToNodeChild)) {
-            if (!skipFrom) {
-              addChild(fromEl, matchingFromEl);
-            }
-            morphEl(matchingFromEl, curToNodeChild);
-          } else {
-            var onBeforeNodeAddedResult = onBeforeNodeAdded(curToNodeChild);
-            if (onBeforeNodeAddedResult !== false) {
-              if (onBeforeNodeAddedResult) {
-                curToNodeChild = onBeforeNodeAddedResult;
-              }
-              if (curToNodeChild.actualize) {
-                curToNodeChild = curToNodeChild.actualize(fromEl.ownerDocument || doc);
-              }
-              addChild(fromEl, curToNodeChild);
-              handleNodeAdded(curToNodeChild);
-            }
-          }
-          curToNodeChild = toNextSibling;
-          curFromNodeChild = fromNextSibling;
-        }
-      cleanupFromEl(fromEl, curFromNodeChild, curFromNodeKey);
-      var specialElHandler = specialElHandlers[fromEl.nodeName];
-      if (specialElHandler) {
-        specialElHandler(fromEl, toEl);
-      }
-    }
-    var morphedNode = fromNode;
-    var morphedNodeType = morphedNode.nodeType;
-    var toNodeType = toNode.nodeType;
-    if (!childrenOnly) {
-      if (morphedNodeType === ELEMENT_NODE) {
-        if (toNodeType === ELEMENT_NODE) {
-          if (!compareNodeNames(fromNode, toNode)) {
-            onNodeDiscarded(fromNode);
-            morphedNode = moveChildren(fromNode, createElementNS(toNode.nodeName, toNode.namespaceURI));
-          }
-        } else {
-          morphedNode = toNode;
-        }
-      } else if (morphedNodeType === TEXT_NODE || morphedNodeType === COMMENT_NODE) {
-        if (toNodeType === morphedNodeType) {
-          if (morphedNode.nodeValue !== toNode.nodeValue) {
-            morphedNode.nodeValue = toNode.nodeValue;
-          }
-          return morphedNode;
-        } else {
-          morphedNode = toNode;
-        }
-      }
-    }
-    if (morphedNode === toNode) {
-      onNodeDiscarded(fromNode);
-    } else {
-      if (toNode.isSameNode && toNode.isSameNode(morphedNode)) {
-        return;
-      }
-      morphEl(morphedNode, toNode, childrenOnly);
-      if (keyedRemovalList) {
-        for (var i = 0, len = keyedRemovalList.length; i < len; i++) {
-          var elToRemove = fromNodesLookup[keyedRemovalList[i]];
-          if (elToRemove) {
-            removeNode(elToRemove, elToRemove.parentNode, false);
-          }
-        }
-      }
-    }
-    if (!childrenOnly && morphedNode !== fromNode && fromNode.parentNode) {
-      if (morphedNode.actualize) {
-        morphedNode = morphedNode.actualize(fromNode.ownerDocument || doc);
-      }
-      fromNode.parentNode.replaceChild(morphedNode, fromNode);
-    }
-    return morphedNode;
-  };
-}
-var morphdom = morphdomFactory(morphAttrs);
-var morphdom_esm_default = morphdom;
 
 // js/phoenix_live_view/dom_patch.js
+var import_idiomorph = __toModule(require_idiomorph_cjs());
 var DOMPatch = class {
   static patchEl(fromEl, toEl, activeElement) {
-    morphdom_esm_default(fromEl, toEl, {
-      childrenOnly: false,
-      onBeforeElUpdated: (fromEl2, toEl2) => {
-        if (activeElement && activeElement.isSameNode(fromEl2) && dom_default.isFormInput(fromEl2)) {
-          dom_default.mergeFocusedInput(fromEl2, toEl2);
-          return false;
+    import_idiomorph.default.morph(fromEl, toEl, {
+      callbacks: {
+        beforeNodeMorphed: (fromEl2, toEl2) => {
+          if (activeElement && activeElement.isSameNode(fromEl2) && dom_default.isFormInput(fromEl2)) {
+            dom_default.mergeFocusedInput(fromEl2, toEl2);
+            return false;
+          }
         }
       }
     });
@@ -2093,6 +2198,7 @@ var DOMPatch = class {
     this.streams = streams;
     this.streamInserts = {};
     this.streamComponentRestore = {};
+    this.nodeRestore = {};
     this.targetCID = targetCID;
     this.cidPatch = isCid(this.targetCID);
     this.pendingRemoves = [];
@@ -2146,152 +2252,154 @@ var DOMPatch = class {
     let updates = [];
     let appendPrependUpdates = [];
     let externalFormTriggered = null;
+    function getNodeKey(node) {
+      if (dom_default.isPhxDestroyed(node)) {
+        return null;
+      }
+      if (isJoinPatch) {
+        return node.id;
+      }
+      return node.id || node.getAttribute && node.getAttribute(PHX_MAGIC_ID);
+    }
+    function handleBeforeNodeMorphed(fromEl, toEl) {
+      dom_default.maybeAddPrivateHooks(toEl, phxViewportTop, phxViewportBottom);
+      if (dom_default.isFeedbackContainer(fromEl, phxFeedbackFor) || dom_default.isFeedbackContainer(toEl, phxFeedbackFor)) {
+        feedbackContainers.push(fromEl);
+        feedbackContainers.push(toEl);
+      }
+      dom_default.cleanChildNodes(toEl, phxUpdate);
+      if (this.skipCIDSibling(toEl)) {
+        return false;
+      }
+      if (dom_default.isPhxSticky(fromEl)) {
+        return false;
+      }
+      if (dom_default.isIgnored(fromEl, phxUpdate) || fromEl.form && fromEl.form.isSameNode(externalFormTriggered)) {
+        this.trackBefore("updated", fromEl, toEl);
+        dom_default.mergeAttrs(fromEl, toEl, { isIgnored: true });
+        updates.push(fromEl);
+        dom_default.applyStickyOperations(fromEl);
+        return false;
+      }
+      if (fromEl.type === "number" && (fromEl.validity && fromEl.validity.badInput)) {
+        return false;
+      }
+      if (!dom_default.syncPendingRef(fromEl, toEl, disableWith)) {
+        if (dom_default.isUploadInput(fromEl)) {
+          this.trackBefore("updated", fromEl, toEl);
+          updates.push(fromEl);
+        }
+        dom_default.applyStickyOperations(fromEl);
+        return false;
+      }
+      if (dom_default.isPhxChild(toEl)) {
+        let prevSession = fromEl.getAttribute(PHX_SESSION);
+        dom_default.mergeAttrs(fromEl, toEl, { exclude: [PHX_STATIC] });
+        if (prevSession !== "") {
+          fromEl.setAttribute(PHX_SESSION, prevSession);
+        }
+        fromEl.setAttribute(PHX_ROOT_ID, this.rootID);
+        dom_default.applyStickyOperations(fromEl);
+        return false;
+      }
+      dom_default.copyPrivates(toEl, fromEl);
+      let isFocusedFormEl = focused && fromEl.isSameNode(focused) && dom_default.isFormInput(fromEl);
+      let focusedSelectChanged = isFocusedFormEl && this.isChangedSelect(fromEl, toEl);
+      if (isFocusedFormEl && fromEl.type !== "hidden" && !focusedSelectChanged) {
+        this.trackBefore("updated", fromEl, toEl);
+        dom_default.mergeFocusedInput(fromEl, toEl);
+        dom_default.syncAttrsToProps(fromEl);
+        updates.push(fromEl);
+        dom_default.applyStickyOperations(fromEl);
+        return false;
+      } else {
+        if (focusedSelectChanged) {
+          fromEl.blur();
+        }
+        if (dom_default.isPhxUpdate(toEl, phxUpdate, ["append", "prepend"])) {
+          appendPrependUpdates.push(new DOMPostMorphRestorer(fromEl, toEl, toEl.getAttribute(phxUpdate)));
+        }
+        dom_default.syncAttrsToProps(toEl);
+        dom_default.applyStickyOperations(toEl);
+        this.trackBefore("updated", fromEl, toEl);
+        return true;
+      }
+    }
     function morph(targetContainer2, source) {
-      morphdom_esm_default(targetContainer2, source, {
-        childrenOnly: targetContainer2.getAttribute(PHX_COMPONENT) === null,
-        getNodeKey: (node) => {
-          if (dom_default.isPhxDestroyed(node)) {
-            return null;
-          }
-          if (isJoinPatch) {
-            return node.id;
-          }
-          return node.id || node.getAttribute && node.getAttribute(PHX_MAGIC_ID);
-        },
-        skipFromChildren: (from) => {
-          return from.getAttribute(phxUpdate) === PHX_STREAM;
-        },
-        addChild: (parent, child) => {
-          let { ref, streamAt } = this.getStreamInsert(child);
-          if (ref === void 0) {
-            return parent.appendChild(child);
-          }
-          this.setStreamRef(child, ref);
-          if (streamAt === 0) {
-            parent.insertAdjacentElement("afterbegin", child);
-          } else if (streamAt === -1) {
-            parent.appendChild(child);
-          } else if (streamAt > 0) {
-            let sibling = Array.from(parent.children)[streamAt];
-            parent.insertBefore(child, sibling);
-          }
-        },
-        onBeforeNodeAdded: (el) => {
-          dom_default.maybeAddPrivateHooks(el, phxViewportTop, phxViewportBottom);
-          this.trackBefore("added", el);
-          let morphedEl = el;
-          if (!isJoinPatch && this.streamComponentRestore[el.id]) {
-            morphedEl = this.streamComponentRestore[el.id];
-            delete this.streamComponentRestore[el.id];
-            morph.bind(this)(morphedEl, el);
-          }
-          return morphedEl;
-        },
-        onNodeAdded: (el) => {
-          if (el.getAttribute) {
-            this.maybeReOrderStream(el, true);
-          }
-          if (dom_default.isFeedbackContainer(el, phxFeedbackFor))
-            feedbackContainers.push(el);
-          if (el instanceof HTMLImageElement && el.srcset) {
-            el.srcset = el.srcset;
-          } else if (el instanceof HTMLVideoElement && el.autoplay) {
-            el.play();
-          }
-          if (dom_default.isNowTriggerFormExternal(el, phxTriggerExternal)) {
-            externalFormTriggered = el;
-          }
-          if (dom_default.isPhxChild(el) && view.ownsElement(el) || dom_default.isPhxSticky(el) && view.ownsElement(el.parentNode)) {
-            this.trackAfter("phxChildAdded", el);
-          }
-          added.push(el);
-        },
-        onNodeDiscarded: (el) => this.onNodeDiscarded(el),
-        onBeforeNodeDiscarded: (el) => {
-          if (el.getAttribute && el.getAttribute(PHX_PRUNE) !== null) {
+      import_idiomorph.default.morph(targetContainer2, source, {
+        callbacks: {
+          getNodeKey,
+          beforeAttributeUpdated: (attributeName, node, mutationType) => {
+            if (node.isEqualNode(targetContainer2) || node.getAttribute("data-phx-skip-attrs")) {
+              return mutationType !== "remove";
+            }
+            if (attributeName === PHX_STREAM_REF && mutationType === "remove") {
+              return false;
+            }
+          },
+          beforeNodeAdded: (el) => {
+            dom_default.maybeAddPrivateHooks(el, phxViewportTop, phxViewportBottom);
+            this.trackBefore("added", el);
+          },
+          afterNodeAdded: (el) => {
+            let morphedEl = el;
+            if (!isJoinPatch && this.streamComponentRestore[el.id]) {
+              morphedEl = this.streamComponentRestore[el.id];
+              delete this.streamComponentRestore[el.id];
+              console.log("restoring nested morph", morphedEl.cloneNode(true));
+              morph.bind(this)(morphedEl, el.cloneNode(true));
+            }
+            if (this.nodeRestore[getNodeKey(el)]) {
+              console.log("restoring el", el);
+              morphedEl = this.nodeRestore[getNodeKey(el)];
+            }
+            el.replaceWith(morphedEl);
+            el = morphedEl;
+            if (el.getAttribute) {
+              this.maybeSetStreamRef(el);
+            }
+            if (dom_default.isFeedbackContainer(el, phxFeedbackFor))
+              feedbackContainers.push(el);
+            if (el instanceof HTMLImageElement && el.srcset) {
+              el.srcset = el.srcset;
+            } else if (el instanceof HTMLVideoElement && el.autoplay) {
+              el.play();
+            }
+            if (dom_default.isNowTriggerFormExternal(el, phxTriggerExternal)) {
+              externalFormTriggered = el;
+            }
+            if (dom_default.isPhxChild(el) && view.ownsElement(el) || dom_default.isPhxSticky(el) && view.ownsElement(el.parentNode)) {
+              this.trackAfter("phxChildAdded", el);
+            }
+            added.push(el);
+          },
+          afterNodeRemoved: (el) => this.onNodeDiscarded(el),
+          beforeNodeRemoved: (el) => {
+            if (el.getAttribute && el.getAttribute(PHX_PRUNE) !== null) {
+              return true;
+            }
+            if (el.parentElement !== null && el.id && dom_default.isPhxUpdate(el.parentElement, phxUpdate, [PHX_STREAM, "append", "prepend"])) {
+              return false;
+            }
+            if (this.maybePendingRemove(el)) {
+              return false;
+            }
+            if (this.skipCIDSibling(el)) {
+              return false;
+            }
             return true;
-          }
-          if (el.parentElement !== null && el.id && dom_default.isPhxUpdate(el.parentElement, phxUpdate, [PHX_STREAM, "append", "prepend"])) {
-            return false;
-          }
-          if (this.maybePendingRemove(el)) {
-            return false;
-          }
-          if (this.skipCIDSibling(el)) {
-            return false;
-          }
-          return true;
-        },
-        onElUpdated: (el) => {
-          if (dom_default.isNowTriggerFormExternal(el, phxTriggerExternal)) {
-            externalFormTriggered = el;
-          }
-          updates.push(el);
-          this.maybeReOrderStream(el, false);
-        },
-        onBeforeElUpdated: (fromEl, toEl) => {
-          dom_default.maybeAddPrivateHooks(toEl, phxViewportTop, phxViewportBottom);
-          if (dom_default.isFeedbackContainer(fromEl, phxFeedbackFor) || dom_default.isFeedbackContainer(toEl, phxFeedbackFor)) {
-            feedbackContainers.push(fromEl);
-            feedbackContainers.push(toEl);
-          }
-          dom_default.cleanChildNodes(toEl, phxUpdate);
-          if (this.skipCIDSibling(toEl)) {
-            this.maybeReOrderStream(fromEl);
-            return false;
-          }
-          if (dom_default.isPhxSticky(fromEl)) {
-            return false;
-          }
-          if (dom_default.isIgnored(fromEl, phxUpdate) || fromEl.form && fromEl.form.isSameNode(externalFormTriggered)) {
-            this.trackBefore("updated", fromEl, toEl);
-            dom_default.mergeAttrs(fromEl, toEl, { isIgnored: true });
-            updates.push(fromEl);
-            dom_default.applyStickyOperations(fromEl);
-            return false;
-          }
-          if (fromEl.type === "number" && (fromEl.validity && fromEl.validity.badInput)) {
-            return false;
-          }
-          if (!dom_default.syncPendingRef(fromEl, toEl, disableWith)) {
-            if (dom_default.isUploadInput(fromEl)) {
-              this.trackBefore("updated", fromEl, toEl);
-              updates.push(fromEl);
+          },
+          afterNodeMorphed: (el) => {
+            if (dom_default.isNowTriggerFormExternal(el, phxTriggerExternal)) {
+              externalFormTriggered = el;
             }
-            dom_default.applyStickyOperations(fromEl);
-            return false;
-          }
-          if (dom_default.isPhxChild(toEl)) {
-            let prevSession = fromEl.getAttribute(PHX_SESSION);
-            dom_default.mergeAttrs(fromEl, toEl, { exclude: [PHX_STATIC] });
-            if (prevSession !== "") {
-              fromEl.setAttribute(PHX_SESSION, prevSession);
+            updates.push(el);
+            this.maybeSetStreamRef(el);
+          },
+          beforeNodeMorphed: (fromEl, toEl) => {
+            if (!handleBeforeNodeMorphed.bind(this)(fromEl, toEl) && getNodeKey(fromEl)) {
+              this.nodeRestore[getNodeKey(fromEl)] = fromEl.cloneNode(true);
             }
-            fromEl.setAttribute(PHX_ROOT_ID, this.rootID);
-            dom_default.applyStickyOperations(fromEl);
-            return false;
-          }
-          dom_default.copyPrivates(toEl, fromEl);
-          let isFocusedFormEl = focused && fromEl.isSameNode(focused) && dom_default.isFormInput(fromEl);
-          let focusedSelectChanged = isFocusedFormEl && this.isChangedSelect(fromEl, toEl);
-          if (isFocusedFormEl && fromEl.type !== "hidden" && !focusedSelectChanged) {
-            this.trackBefore("updated", fromEl, toEl);
-            dom_default.mergeFocusedInput(fromEl, toEl);
-            dom_default.syncAttrsToProps(fromEl);
-            updates.push(fromEl);
-            dom_default.applyStickyOperations(fromEl);
-            return false;
-          } else {
-            if (focusedSelectChanged) {
-              fromEl.blur();
-            }
-            if (dom_default.isPhxUpdate(toEl, phxUpdate, ["append", "prepend"])) {
-              appendPrependUpdates.push(new DOMPostMorphRestorer(fromEl, toEl, toEl.getAttribute(phxUpdate)));
-            }
-            dom_default.syncAttrsToProps(toEl);
-            dom_default.applyStickyOperations(toEl);
-            this.trackBefore("updated", fromEl, toEl);
-            return true;
           }
         }
       });
@@ -2377,6 +2485,13 @@ var DOMPatch = class {
     let insert = el.id ? this.streamInserts[el.id] : {};
     return insert || {};
   }
+  maybeSetStreamRef(el) {
+    let { ref } = this.getStreamInsert(el);
+    if (ref === void 0) {
+      return;
+    }
+    this.setStreamRef(el, ref);
+  }
   setStreamRef(el, ref) {
     dom_default.putSticky(el, PHX_STREAM_REF, (el2) => el2.setAttribute(PHX_STREAM_REF, ref));
   }
@@ -2392,7 +2507,9 @@ var DOMPatch = class {
     if (!el.parentElement) {
       return;
     }
-    if (streamAt === 0) {
+    if (streamAt === -1) {
+      el.parentElement.insertAdjacentElement("beforeend", el);
+    } else if (streamAt === 0) {
       el.parentElement.insertBefore(el, el.parentElement.firstElementChild);
     } else if (streamAt > 0) {
       let children = Array.from(el.parentElement.children);
@@ -3328,7 +3445,7 @@ var View = class {
       let tag = this.el.tagName;
       let cids = diff ? this.rendered.componentCIDs(diff) : null;
       let [html, streams] = this.rendered.toString(cids);
-      return [`<${tag}>${html}</${tag}>`, streams];
+      return [`<${tag} id="${this.id}" data-phx-skip-attrs>${html}</${tag}>`, streams];
     });
   }
   componentPatch(diff, cid) {
