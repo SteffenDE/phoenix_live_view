@@ -5,6 +5,8 @@ defmodule Phoenix.LiveView.StartAsyncTest do
   import Phoenix.LiveViewTest
   alias Phoenix.LiveViewTest.Endpoint
 
+  import ExUnit.CaptureIO
+
   @endpoint Endpoint
 
   setup do
@@ -65,7 +67,7 @@ defmodule Phoenix.LiveView.StartAsyncTest do
       Process.register(self(), :start_async_trap_exit_test)
       {:ok, lv, _html} = live(conn, "/start_async?test=trap_exit")
 
-      assert render_async(lv, 200) =~ "result: :loading"
+      assert render_async(lv, 200) =~ "{:exit, :boom}"
       assert render(lv)
       assert_receive {:exit, _pid, :boom}, 1000
     end
@@ -79,25 +81,37 @@ defmodule Phoenix.LiveView.StartAsyncTest do
     test "navigate", %{conn: conn} do
       {:ok, lv, _html} = live(conn, "/start_async?test=navigate")
 
-      assert_redirect lv, "/start_async?test=ok"
+      assert_redirect(lv, "/start_async?test=ok")
     end
 
     test "patch", %{conn: conn} do
       {:ok, lv, _html} = live(conn, "/start_async?test=patch")
 
-      assert_patch lv, "/start_async?test=ok"
+      assert_patch(lv, "/start_async?test=ok")
     end
 
     test "redirect", %{conn: conn} do
       {:ok, lv, _html} = live(conn, "/start_async?test=redirect")
 
-      assert_redirect lv, "/not_found"
+      assert_redirect(lv, "/not_found")
     end
 
     test "put_flash", %{conn: conn} do
       {:ok, lv, _html} = live(conn, "/start_async?test=put_flash")
 
       assert render_async(lv) =~ "flash: hello"
+    end
+
+    test "warns when accessing socket in function at runtime", %{conn: conn} do
+      warnings =
+        capture_io(:stderr, fn ->
+          {:ok, lv, _html} = live(conn, "/start_async?test=socket_warning")
+
+          render_async(lv)
+        end)
+
+      assert warnings =~
+               "you are accessing the LiveView Socket inside a function given to start_async"
     end
   end
 
@@ -164,25 +178,25 @@ defmodule Phoenix.LiveView.StartAsyncTest do
     test "navigate", %{conn: conn} do
       {:ok, lv, _html} = live(conn, "/start_async?test=lc_navigate")
 
-      assert_redirect lv, "/start_async?test=ok"
+      assert_redirect(lv, "/start_async?test=ok")
     end
 
     test "patch", %{conn: conn} do
       {:ok, lv, _html} = live(conn, "/start_async?test=lc_patch")
 
-      assert_patch lv, "/start_async?test=ok"
+      assert_patch(lv, "/start_async?test=ok")
     end
 
     test "redirect", %{conn: conn} do
       {:ok, lv, _html} = live(conn, "/start_async?test=lc_redirect")
 
-      assert_redirect lv, "/not_found"
+      assert_redirect(lv, "/not_found")
     end
 
     test "navigate with flash", %{conn: conn} do
       {:ok, lv, _html} = live(conn, "/start_async?test=lc_navigate_flash")
 
-      flash = assert_redirect lv, "/start_async?test=ok"
+      flash = assert_redirect(lv, "/start_async?test=ok")
       assert %{"info" => "hello"} = flash
     end
   end
