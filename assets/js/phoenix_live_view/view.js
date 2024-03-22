@@ -117,7 +117,7 @@ export default class View {
     this.childJoins = 0
     this.loaderTimer = null
     this.pendingDiffs = []
-    this.pruningCIDs = []
+    this.pendingForms = new Set()
     this.redirect = false
     this.href = null
     this.joinCount = this.parent ? this.parent.joinCount - 1 : 0
@@ -127,7 +127,6 @@ export default class View {
     this.stopCallback = function(){ }
     this.pendingJoinOps = this.parent ? null : []
     this.viewHooks = {}
-    this.uploaders = {}
     this.formSubmits = []
     this.children = this.parent ? null : {}
     this.root.children[this.id] = {}
@@ -281,12 +280,16 @@ export default class View {
       this.rendered = new Rendered(this.id, diff)
       let [html, streams] = this.renderContainer(null, "join")
       this.dropPendingRefs()
-      let forms = this.formsForRecovery(html)
+      let forms = this.formsForRecovery(html).filter(([form, newForm, newCid]) => {
+        return !this.pendingForms.has(form.id)
+      })
       this.joinCount++
 
       if(forms.length > 0){
         forms.forEach(([form, newForm, newCid], i) => {
+          this.pendingForms.add(form.id)
           this.pushFormRecovery(form, newCid, resp => {
+            this.pendingForms.delete(form.id)
             if(i === forms.length - 1){
               this.onJoinComplete(resp, html, streams, events)
             }
@@ -306,6 +309,9 @@ export default class View {
   }
 
   onJoinComplete({live_patch}, html, streams, events){
+    // we can clear pending form recoveries now that we've joined.
+    // They either all resolved or were abandoned
+    this.pendingForms.clear()
     // In order to provide a better experience, we want to join
     // all LiveViews first and only then apply their patches.
     if(this.joinCount > 1 || (this.parent && !this.parent.isJoinPending())){
@@ -537,7 +543,7 @@ export default class View {
     // Otherwise, patch entire LV container.
     if(this.rendered.isComponentOnlyDiff(diff)){
       this.liveSocket.time("component patch complete", () => {
-        let parentCids = DOM.findParentCIDs(this.el, this.rendered.componentCIDs(diff))
+        let parentCids = DOM.findExistingParentCIDs(this.el, this.rendered.componentCIDs(diff))
         parentCids.forEach(parentCID => {
           if(this.componentPatch(this.rendered.getComponent(diff, parentCID), parentCID)){ phxChildrenAdded = true }
         })
@@ -559,7 +565,7 @@ export default class View {
       let tag = this.el.tagName
       // Don't skip any component in the diff nor any marked as pruned
       // (as they may have been added back)
-      let cids = diff ? this.rendered.componentCIDs(diff).concat(this.pruningCIDs) : null
+      let cids = diff ? this.rendered.componentCIDs(diff) : null
       let [html, streams] = this.rendered.toString(cids)
       return [`<${tag}>${html}</${tag}>`, streams]
     })
@@ -811,10 +817,12 @@ export default class View {
     let disableWith = this.binding(PHX_DISABLE_WITH)
     if(opts.loading){ elements = elements.concat(DOM.all(document, opts.loading))}
 
-    elements.forEach(el => {
-      el.classList.add(`phx-${event}-loading`)
+    for(let el of elements){
       el.setAttribute(PHX_REF, newRef)
       el.setAttribute(PHX_REF_SRC, this.el.id)
+      if(opts.submitter && !(el === opts.submitter || el === opts.form)){ continue }
+
+      el.classList.add(`phx-${event}-loading`)
       let disableText = el.getAttribute(disableWith)
       if(disableText !== null){
         if(!el.getAttribute(PHX_DISABLE_WITH_RESTORE)){
@@ -825,7 +833,7 @@ export default class View {
         el.setAttribute(PHX_DISABLED, el.getAttribute(PHX_DISABLED) || el.disabled)
         el.setAttribute("disabled", "")
       }
-    })
+    }
     return [newRef, elements, opts]
   }
 
@@ -1020,7 +1028,7 @@ export default class View {
   }
 
   pushFormSubmit(formEl, targetCtx, phxEvent, submitter, opts, onReply){
-    let refGenerator = () => this.disableForm(formEl, opts)
+    let refGenerator = () => this.disableForm(formEl, {...opts, form: formEl, submitter: submitter})
     let cid = this.targetComponentID(formEl, targetCtx)
     if(LiveUploader.hasUploadsInProgress(formEl)){
       let [ref, _els] = refGenerator()
@@ -1029,7 +1037,12 @@ export default class View {
     } else if(LiveUploader.inputsAwaitingPreflight(formEl).length > 0){
       let [ref, els] = refGenerator()
       let proxyRefGen = () => [ref, els, opts]
-      this.uploadFiles(formEl, targetCtx, ref, cid, (_uploads) => {
+      this.uploadFiles(formEl, targetCtx, ref, cid, (uploads) => {
+        // if we still having pending preflights it means we have invalid entries
+        // and the phx-submit cannot be completed
+        if(LiveUploader.inputsAwaitingPreflight(formEl).length > 0){
+          return this.undoRefs(ref)
+        }
         let meta = this.extractMeta(formEl)
         let formData = serializeForm(formEl, {submitter, ...meta})
         this.pushWithReply(proxyRefGen, "event", {
@@ -1063,8 +1076,12 @@ export default class View {
         if(numFileInputsInProgress === 0){ onComplete() }
       });
 
-      this.uploaders[inputEl] = uploader
       let entries = uploader.entries().map(entry => entry.toPreflightPayload())
+
+      if(entries.length === 0) {
+        numFileInputsInProgress--
+        return
+      }
 
       let payload = {
         ref: inputEl.getAttribute(PHX_UPLOAD_REF),
@@ -1076,10 +1093,21 @@ export default class View {
 
       this.pushWithReply(null, "allow_upload", payload, resp => {
         this.log("upload", () => ["got preflight response", resp])
-        if(resp.error){
+        // the preflight will reject entries beyond the max entries
+        // so we error and cancel entries on the client that are missing from the response
+        uploader.entries().forEach(entry => {
+          if(resp.entries && !resp.entries[entry.ref]){
+            this.handleFailedEntryPreflight(entry.ref, "failed preflight", uploader)
+          }
+        })
+        // for auto uploads, we may have an empty entries response from the server
+        // for form submits that contain invalid entries
+        if(resp.error || Object.keys(resp.entries).length === 0){
           this.undoRefs(ref)
-          let [entry_ref, reason] = resp.error
-          this.log("upload", () => [`error for entry ${entry_ref}`, reason])
+          let errors = resp.error || []
+          errors.map(([entry_ref, reason]) => {
+            this.handleFailedEntryPreflight(entry_ref, reason, uploader)
+          })
         } else {
           let onError = (callback) => {
             this.channel.onError(() => {
@@ -1090,6 +1118,17 @@ export default class View {
         }
       })
     })
+  }
+
+  handleFailedEntryPreflight(uploadRef, reason, uploader){
+    if(uploader.isAutoUpload()){
+      // uploadRef may be top level upload config ref or entry ref
+      let entry = uploader.entries().find(entry => entry.ref === uploadRef.toString())
+      if(entry){ entry.cancel() }
+    } else {
+      uploader.entries().map(entry => entry.cancel())
+    }
+    this.log("upload", () => [`error for entry ${uploadRef}`, reason])
   }
 
   dispatchUploads(targetCtx, name, filesOrBlobs){
@@ -1181,11 +1220,9 @@ export default class View {
   }
 
   maybePushComponentsDestroyed(destroyedCIDs){
-    let willDestroyCIDs = destroyedCIDs.concat(this.pruningCIDs).filter(cid => {
+    let willDestroyCIDs = destroyedCIDs.filter(cid => {
       return DOM.findComponentNodeList(this.el, cid).length === 0
     })
-    // make sure this is a copy and not a reference
-    this.pruningCIDs = willDestroyCIDs.concat([])
 
     if(willDestroyCIDs.length > 0){
       // we must reset the render change tracking for cids that
@@ -1201,7 +1238,6 @@ export default class View {
 
         if(completelyDestroyCIDs.length > 0){
           this.pushWithReply(null, "cids_destroyed", {cids: completelyDestroyCIDs}, (resp) => {
-            this.pruningCIDs = this.pruningCIDs.filter(cid => resp.cids.indexOf(cid) === -1)
             this.rendered.pruneCIDs(resp.cids)
           })
         }

@@ -77,7 +77,7 @@ their own events too.
 ### Live navigation events
 
 For live page navigation via `<.link navigate={...}>` and `<.link patch={...}>`,
-their server-side equivalents `push_redirect` and `push_patch`, as well as form
+their server-side equivalents `push_navigate` and `push_patch`, as well as form
 submits via `phx-submit`, the JavaScript events `"phx:page-loading-start"` and
 `"phx:page-loading-stop"` are dispatched on window. Additionally, any `phx-`
 event may dispatch page loading events by annotating the DOM element with
@@ -204,7 +204,8 @@ The above life-cycle callbacks have in-scope access to the following attributes:
     to LiveViews and LiveComponents. It sends the event to the LiveComponent or LiveView the `selectorOrTarget` is
     defined in, where its value can be either a query selector or an actual DOM element. If the query selector returns
     more than one element it will send the event to all of them, even if all the elements are in the same LiveComponent
-    or LiveView.
+    or LiveView. `pushEventTo` supports passing the node element e.g. `this.el` instead of selector e.g. `"#" + this.el.id`
+    as the first parameter for target.
   * `handleEvent(event, (payload) => ...)` - method to handle an event pushed from the server
   * `upload(name, files)` - method to inject a list of file-like objects into an uploader.
   * `uploadTo(selectorOrTarget, name, files)` - method to inject a list of file-like objects into an uploader.
@@ -311,7 +312,28 @@ Hooks.Chart = {
 }
 ```
 
-*Note*: remember events pushed from the server via `push_event` are global and will be dispatched
-to all active hooks on the client who are handling that event.
+Events pushed from the server via `push_event` are global and will be dispatched
+to all active hooks on the client who are handling that event. If you need to scope events
+(for example when pushing from a live component that has siblings on the current live view),
+then this must be done by namespacing them:
+
+    def update(%{id: id, points: points} = assigns, socket) do
+      socket =
+        socket
+        |> assign(assigns)
+        |> push_event("points-#{id}", points)
+
+      {:ok, socket}
+    end
+
+And then on the client:
+
+```javascript
+Hooks.Chart = {
+  mounted(){
+    this.handleEvent(`points-${this.el.id}`, (points) => MyChartLib.addPoints(points));
+  }
+}
+```
 
 *Note*: In case a LiveView pushes events and renders content, `handleEvent` callbacks are invoked after the page is updated. Therefore, if the LiveView redirects at the same time it pushes events, callbacks won't be invoked on the old page's elements. Callbacks would be invoked on the redirected page's newly mounted hook elements.

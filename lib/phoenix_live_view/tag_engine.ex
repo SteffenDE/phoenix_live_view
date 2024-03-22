@@ -41,6 +41,29 @@ defmodule Phoenix.LiveView.TagEngine do
   @callback void?(name :: binary()) :: boolean()
 
   @doc """
+  Implements processing of attributes.
+
+  It returns a quoted expression or attributes. If attributes are returned,
+  the second element is a list where each element in the list represents
+  one attribute.If the list element is a two-element tuple, it is assumed
+  the key is the name to be statically written in the template. The second
+  element is the value which is also statically written to the template whenever
+  possible (such as binaries or binaries inside a list).
+  """
+  @callback handle_attributes(ast :: Macro.t(), meta :: keyword) ::
+              {:attributes, [{binary(), Macro.t()} | Macro.t()]} | {:quoted, Macro.t()}
+
+  @doc """
+  Callback invoked to add annotations around the whole body of a template.
+  """
+  @callback annotate_body(caller :: Macro.Env.t()) :: {String.t(), String.t()} | nil
+
+  @doc """
+  Callback invoked to add caller annotations before a function component is invoked.
+  """
+  @callback annotate_caller(file :: String.t(), line :: integer()) :: String.t() | nil
+
+  @doc """
   Renders a component defined by the given function.
 
   This function is rarely invoked directly by users. Instead, it is used by `~H`
@@ -169,16 +192,16 @@ defmodule Phoenix.LiveView.TagEngine do
       caller: Keyword.fetch!(opts, :caller),
       previous_token_slot?: false,
       source: Keyword.fetch!(opts, :source),
-      tag_handler: tag_handler,
-      annotate_tagged_content: Keyword.get(opts, :annotate_tagged_content)
+      tag_handler: tag_handler
     }
   end
 
   ## These callbacks return AST
 
   @impl true
-  def handle_body(%{tokens: tokens, file: file, cont: cont} = state) do
-    tokens = Tokenizer.finalize(tokens, file, cont, state.source)
+  def handle_body(state) do
+    %{tokens: tokens, file: file, cont: cont, source: source, caller: caller} = state
+    tokens = Tokenizer.finalize(tokens, file, cont, source)
 
     token_state =
       state
@@ -187,11 +210,10 @@ defmodule Phoenix.LiveView.TagEngine do
       |> validate_unclosed_tags!("template")
 
     opts = [root: token_state.root || false]
-    %{caller: caller, annotate_tagged_content: annotate_tagged_content} = state
 
     opts =
-      if annotate_tagged_content && caller && has_tags?(tokens) do
-        [body_annotation: annotate_tagged_content.(caller)] ++ opts
+      if body_annotation = caller && has_tags?(tokens) && state.tag_handler.annotate_body(caller) do
+        [body_annotation: body_annotation] ++ opts
       else
         opts
       end
@@ -239,8 +261,7 @@ defmodule Phoenix.LiveView.TagEngine do
            caller: caller,
            source: source,
            indentation: indentation,
-           tag_handler: tag_handler,
-           annotate_tagged_content: annotate_tagged_content
+           tag_handler: tag_handler
          },
          root
        ) do
@@ -256,8 +277,7 @@ defmodule Phoenix.LiveView.TagEngine do
       root: root,
       previous_token_slot?: false,
       indentation: indentation,
-      tag_handler: tag_handler,
-      annotate_tagged_content: annotate_tagged_content
+      tag_handler: tag_handler
     }
   end
 
@@ -468,6 +488,7 @@ defmodule Phoenix.LiveView.TagEngine do
       {false, _tag_meta, _attrs} ->
         state
         |> set_root_on_not_tag()
+        |> maybe_anno_caller(meta, state.file, line)
         |> update_subengine(:handle_expr, ["=", ast])
 
       {true, new_meta, _new_attrs} ->
@@ -475,6 +496,7 @@ defmodule Phoenix.LiveView.TagEngine do
         |> push_substate_to_stack()
         |> update_subengine(:handle_begin, [])
         |> set_root_on_not_tag()
+        |> maybe_anno_caller(meta, state.file, line)
         |> update_subengine(:handle_expr, ["=", ast])
         |> handle_special_expr(new_meta)
     end
@@ -533,6 +555,7 @@ defmodule Phoenix.LiveView.TagEngine do
 
     state
     |> pop_substate_from_stack()
+    |> maybe_anno_caller(meta, state.file, line)
     |> update_subengine(:handle_expr, ["=", ast])
     |> handle_special_expr(tag_meta)
   end
@@ -605,7 +628,8 @@ defmodule Phoenix.LiveView.TagEngine do
 
     mod = actual_component_module(state.caller, fun)
     store_component_call({mod, fun}, attr_info, [], line, state)
-    call = {fun, [line: line, column: column], __MODULE__}
+    meta = [line: line, column: column]
+    call = {fun, meta, __MODULE__}
 
     ast =
       quote line: line do
@@ -620,6 +644,7 @@ defmodule Phoenix.LiveView.TagEngine do
       {false, _tag_meta, _attrs} ->
         state
         |> set_root_on_not_tag()
+        |> maybe_anno_caller(meta, state.file, line)
         |> update_subengine(:handle_expr, ["=", ast])
 
       {true, new_meta, _new_attrs} ->
@@ -627,6 +652,7 @@ defmodule Phoenix.LiveView.TagEngine do
         |> push_substate_to_stack()
         |> update_subengine(:handle_begin, [])
         |> set_root_on_not_tag()
+        |> maybe_anno_caller(meta, state.file, line)
         |> update_subengine(:handle_expr, ["=", ast])
         |> handle_special_expr(new_meta)
     end
@@ -667,7 +693,8 @@ defmodule Phoenix.LiveView.TagEngine do
       build_component_assigns({"local component", fun}, attrs, line, tag_meta, state)
 
     store_component_call({mod, fun}, attr_info, slot_info, line, state)
-    call = {fun, [line: line, column: column], __MODULE__}
+    meta = [line: line, column: column]
+    call = {fun, meta, __MODULE__}
 
     ast =
       quote line: line do
@@ -681,6 +708,7 @@ defmodule Phoenix.LiveView.TagEngine do
 
     state
     |> pop_substate_from_stack()
+    |> maybe_anno_caller(meta, state.file, line)
     |> update_subengine(:handle_expr, ["=", ast])
     |> handle_special_expr(tag_meta)
   end
@@ -819,19 +847,20 @@ defmodule Phoenix.LiveView.TagEngine do
       {:root, {:expr, _, _} = expr, _attr_meta}, state ->
         ast = parse_expr!(expr, state.file)
 
-        if pairs = dynamic_attrs_literal(ast) do
-          # Optimization: if keys are known at compilation time, we
-          # inline the dynamic attributes
-          Enum.reduce(pairs, state, fn {key, value}, state ->
-            name = to_string(key)
-            handle_attr_escape(state, meta, name, value)
-          end)
-        else
-          handle_attrs_escape(state, meta, ast)
-        end
+        # If we have a map of literal keys, we unpack it as a list
+        # to simplify the downstream check.
+        ast =
+          with {:%{}, _meta, pairs} <- ast,
+               true <- literal_keys?(pairs) do
+            pairs
+          else
+            _ -> ast
+          end
+
+        handle_tag_expr_attrs(state, meta, ast)
 
       {name, {:expr, _, _} = expr, _attr_meta}, state ->
-        handle_attr_escape(state, meta, name, parse_expr!(expr, state.file))
+        handle_tag_expr_attrs(state, meta, [{name, parse_expr!(expr, state.file)}])
 
       {name, {:string, value, %{delimiter: ?"}}, _attr_meta}, state ->
         update_subengine(state, :handle_text, [meta, ~s( #{name}="#{value}")])
@@ -844,15 +873,41 @@ defmodule Phoenix.LiveView.TagEngine do
     end)
   end
 
-  defp dynamic_attrs_literal({:%{}, _meta, pairs}) do
-    if literal_keys?(pairs), do: pairs
+  defp handle_tag_expr_attrs(state, meta, ast) do
+    # It is safe to List.wrap/1 because if we receive nil,
+    # it would become the interpolation of nil, which is an
+    # empty string anyway.
+    case state.tag_handler.handle_attributes(ast, meta) do
+      {:attributes, attrs} ->
+        Enum.reduce(attrs, state, fn
+          {name, value}, state ->
+            state = update_subengine(state, :handle_text, [meta, ~s( #{name}=")])
+
+            state =
+              value
+              |> List.wrap()
+              |> Enum.reduce(state, fn
+                binary, state when is_binary(binary) ->
+                  update_subengine(state, :handle_text, [meta, binary])
+
+                expr, state ->
+                  update_subengine(state, :handle_expr, ["=", expr])
+              end)
+
+            update_subengine(state, :handle_text, [meta, ~s(")])
+
+          quoted, state ->
+            update_subengine(state, :handle_expr, ["=", quoted])
+        end)
+
+      {:quoted, quoted} ->
+        update_subengine(state, :handle_expr, ["=", quoted])
+    end
   end
 
-  defp dynamic_attrs_literal(list) when is_list(list) do
-    if literal_keys?(list), do: list
+  defp parse_expr!({:expr, value, %{line: line, column: col}}, file) do
+    Code.string_to_quoted!(value, line: line, column: col, file: file)
   end
-
-  defp dynamic_attrs_literal(_other), do: nil
 
   defp literal_keys?([{key, _value} | rest]) when is_atom(key) or is_binary(key),
     do: literal_keys?(rest)
@@ -891,179 +946,6 @@ defmodule Phoenix.LiveView.TagEngine do
       state
     end
   end
-
-  defp parse_expr!({:expr, value, %{line: line, column: col}}, file) do
-    Code.string_to_quoted!(value, line: line, column: col, file: file)
-  end
-
-  defp handle_attrs_escape(state, meta, attrs) do
-    ast =
-      quote line: meta[:line] do
-        unquote(__MODULE__).attributes_escape(unquote(attrs))
-      end
-
-    update_subengine(state, :handle_expr, ["=", ast])
-  end
-
-  defp handle_attr_escape(state, meta, name, value) do
-    # See if we can emit anything about the attribute at compile-time.
-    case extract_compile_attr(name, value) do
-      :error ->
-        # Now if the attribute can be encoded as empty whenever
-        # it is false or nil, we also emit its text before hand.
-        if call = empty_attribute_encoder(name, value, meta) do
-          state
-          |> update_subengine(:handle_text, [meta, ~s( #{name}=")])
-          |> update_subengine(:handle_expr, ["=", {:safe, call}])
-          |> update_subengine(:handle_text, [meta, ~s(")])
-        else
-          handle_attrs_escape(state, meta, [{safe_unless_special(name), value}])
-        end
-
-      parts ->
-        state
-        |> update_subengine(:handle_text, [meta, ~s( #{name}=")])
-        |> handle_compile_attrs(meta, parts)
-        |> update_subengine(:handle_text, [meta, ~s(")])
-    end
-  end
-
-  defp handle_compile_attrs(state, meta, binaries) do
-    binaries
-    |> Enum.reverse()
-    |> Enum.reduce(state, fn
-      {:text, value}, state ->
-        update_subengine(state, :handle_text, [meta, value])
-
-      {:binary, value}, state ->
-        ast =
-          quote line: meta[:line] do
-            {:safe, unquote(__MODULE__).binary_encode(unquote(value))}
-          end
-
-        update_subengine(state, :handle_expr, ["=", ast])
-
-      {:class, value}, state ->
-        ast =
-          quote line: meta[:line] do
-            {:safe, unquote(__MODULE__).class_attribute_encode(unquote(value))}
-          end
-
-        update_subengine(state, :handle_expr, ["=", ast])
-    end)
-  end
-
-  @doc false
-  def attributes_escape(attrs) do
-    # We don't want to dasherize keys, which Phoenix.HTML does for atoms,
-    # so we convert those to strings
-
-    attrs
-    |> Enum.map(fn
-      {key, value} when is_atom(key) -> {Atom.to_string(key), value}
-      other -> other
-    end)
-    |> Phoenix.HTML.attributes_escape()
-  end
-
-  defp extract_compile_attr("class", [head | tail]) when is_binary(head) do
-    {bins, tail} = Enum.split_while(tail, &is_binary/1)
-    encoded = class_attribute_encode([head | bins])
-
-    if tail == [] do
-      [{:text, IO.iodata_to_binary(encoded)}]
-    else
-      # We need to return it in reverse order as they are reversed later on.
-      [{:class, tail}, {:text, IO.iodata_to_binary([encoded, ?\s])}]
-    end
-  end
-
-  defp extract_compile_attr(_name, value) do
-    extract_binaries(value, true, [])
-  end
-
-  defp extract_binaries({:<>, _, [left, right]}, _root?, acc) do
-    extract_binaries(right, false, extract_binaries(left, false, acc))
-  end
-
-  defp extract_binaries({:<<>>, _, parts} = bin, _root?, acc) do
-    Enum.reduce(parts, acc, fn
-      part, acc when is_binary(part) ->
-        [{:text, binary_encode(part)} | acc]
-
-      {:"::", _, [binary, {:binary, _, _}]}, acc ->
-        [{:binary, binary} | acc]
-
-      _, _ ->
-        throw(:unknown_part)
-    end)
-  catch
-    :unknown_part -> [{:binary, bin} | acc]
-  end
-
-  defp extract_binaries(binary, _root?, acc) when is_binary(binary),
-    do: [{:text, binary_encode(binary)} | acc]
-
-  defp extract_binaries(value, false, acc),
-    do: [{:binary, value} | acc]
-
-  defp extract_binaries(_value, true, _acc),
-    do: :error
-
-  # TODO: We can refactor the empty_attribute_encoder to simply return an atom on Elixir v1.13+
-  defp empty_attribute_encoder("class", value, meta) do
-    quote line: meta[:line], do: unquote(__MODULE__).class_attribute_encode(unquote(value))
-  end
-
-  defp empty_attribute_encoder("style", value, meta) do
-    quote line: meta[:line], do: unquote(__MODULE__).empty_attribute_encode(unquote(value))
-  end
-
-  defp empty_attribute_encoder(_, _, _), do: nil
-
-  @doc false
-  def class_attribute_encode(list) when is_list(list),
-    do: list |> class_attribute_list() |> Phoenix.HTML.Engine.encode_to_iodata!()
-
-  def class_attribute_encode(other),
-    do: empty_attribute_encode(other)
-
-  defp class_attribute_list(value) do
-    value
-    |> Enum.flat_map(fn
-      nil -> []
-      false -> []
-      inner when is_list(inner) -> [class_attribute_list(inner)]
-      other -> [other]
-    end)
-    |> Enum.join(" ")
-  end
-
-  @doc false
-  def empty_attribute_encode(nil), do: ""
-  def empty_attribute_encode(false), do: ""
-  def empty_attribute_encode(true), do: ""
-  def empty_attribute_encode(value), do: Phoenix.HTML.Engine.encode_to_iodata!(value)
-
-  @doc false
-  def binary_encode(value) when is_binary(value) do
-    value
-    |> Phoenix.HTML.Engine.encode_to_iodata!()
-    |> IO.iodata_to_binary()
-  end
-
-  def binary_encode(value) do
-    raise ArgumentError, "expected a binary in <>, got: #{inspect(value)}"
-  end
-
-  # We mark attributes as safe so we don't escape them
-  # at rendering time. However, some attributes are
-  # specially handled, so we keep them as strings shape.
-  defp safe_unless_special("id"), do: :id
-  defp safe_unless_special("aria"), do: :aria
-  defp safe_unless_special("class"), do: :class
-  defp safe_unless_special("data"), do: :data
-  defp safe_unless_special(name), do: {:safe, name}
 
   ## build_self_close_component_assigns/build_component_assigns
 
@@ -1327,18 +1209,10 @@ defmodule Phoenix.LiveView.TagEngine do
   defp to_location(%{line: line, column: column}), do: [line: line, column: column]
 
   defp actual_component_module(env, fun) do
-    case lookup_import(env, {fun, 1}) do
+    case Macro.Env.lookup_import(env, {fun, 1}) do
       [{_, module} | _] -> module
       _ -> env.module
     end
-  end
-
-  # TODO: Use Macro.Env.lookup_import/2 when we require Elixir v1.13+
-  defp lookup_import(%Macro.Env{functions: functions, macros: macros}, {name, arity} = pair)
-       when is_atom(name) and is_integer(arity) do
-    f = for {mod, pairs} <- functions, :ordsets.is_element(pair, pairs), do: {:function, mod}
-    m = for {mod, pairs} <- macros, :ordsets.is_element(pair, pairs), do: {:macro, mod}
-    f ++ m
   end
 
   defp remove_phx_no_break(attrs) do
@@ -1470,5 +1344,13 @@ defmodule Phoenix.LiveView.TagEngine do
       column: meta.column,
       file: state.file,
       description: message <> ParseError.code_snippet(state.source, meta, state.indentation)
+  end
+
+  defp maybe_anno_caller(state, meta, file, line) do
+    if anno = state.tag_handler.annotate_caller(file, line) do
+      update_subengine(state, :handle_text, [meta, anno])
+    else
+      state
+    end
   end
 end

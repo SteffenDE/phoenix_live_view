@@ -250,6 +250,8 @@ export default class Rendered {
       let targetVal = target[key]
       if(isObject(val) && val[STATIC] === undefined && isObject(targetVal)){
         merged[key] = this.cloneMerge(targetVal, val, pruneMagicId)
+      } else if(val === undefined && isObject(targetVal)){
+        merged[key] = this.cloneMerge(targetVal, {}, pruneMagicId)
       }
     }
     if(pruneMagicId){
@@ -287,7 +289,7 @@ export default class Rendered {
 
   nextMagicID(){
     this.magicId++
-    return `${this.parentViewId()}-${this.magicId}`
+    return `m${this.magicId}-${this.parentViewId()}`
   }
 
   // Converts rendered tree to output buffer.
@@ -323,7 +325,7 @@ export default class Rendered {
     if(isRoot){
       let skip = false
       let attrs
-      // when a LC is added on the page, we need to re-render the entire LC tree,
+      // When a LC is re-added to the page, we need to re-render the entire LC tree,
       // therefore changeTracking is false; however, we need to keep all the magicIds
       // from any function component so the next time the LC is updated, we can apply
       // the skip optimization
@@ -396,12 +398,15 @@ export default class Rendered {
     // Both optimization flows apply here. newRender is set based on the onlyCids optimization, and
     // we track a deterministic magicId based on the cid.
     //
+    // changeTracking is about the entire tree
+    // newRender is about the current root in the tree
+    //
     // By default changeTracking is enabled, but we special case the flow where the client is pruning
     // cids and the server adds the component back. In such cases, we explicitly disable changeTracking
     // with resetRender for this cid, then re-enable it after the recursive call to skip the optimization
     // for the entire component tree.
     component.newRender = !skip
-    component.magicId = `${this.parentViewId()}-c-${cid}`
+    component.magicId = `c${cid}-${this.parentViewId()}`
     // enable change tracking as long as the component hasn't been reset
     let changeTracking = !component.reset
     let [html, streams] = this.recursiveToString(component, components, onlyCids, changeTracking, attrs)

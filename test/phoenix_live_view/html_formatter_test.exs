@@ -1715,6 +1715,18 @@ if Version.match?(System.version(), ">= 1.13.0") do
 
       assert_formatter_output(
         """
+        <script phx-no-format><%= raw(js_code()) %></script>
+        """,
+        """
+        <script
+          phx-no-format
+        ><%= raw(js_code()) %></script>
+        """,
+        line_length: 5
+      )
+
+      assert_formatter_output(
+        """
         <span phx-no-format class="underline">Check</span> Messages
         """,
         """
@@ -2049,6 +2061,14 @@ if Version.match?(System.version(), ">= 1.13.0") do
         """,
         heex_line_length: 72
       )
+    end
+
+    test "does not format when empty" do
+      assert_formatter_doesnt_change("")
+
+      assert_formatter_doesnt_change("", opening_delimiter: "\"")
+
+      assert_formatter_doesnt_change("", opening_delimiter: "\"\"\"")
     end
 
     # TODO: Remove this `if` when we require Elixir 1.14+

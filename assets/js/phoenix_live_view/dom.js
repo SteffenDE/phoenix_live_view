@@ -69,7 +69,8 @@ let DOM = {
     let wantsNewTab = e.ctrlKey || e.shiftKey || e.metaKey || (e.button && e.button === 1)
     let isDownload = (e.target instanceof HTMLAnchorElement && e.target.hasAttribute("download"))
     let isTargetBlank = e.target.hasAttribute("target") && e.target.getAttribute("target").toLowerCase() === "_blank"
-    return wantsNewTab || isTargetBlank || isDownload
+    let isTargetNamedTab = e.target.hasAttribute("target") && !e.target.getAttribute("target").startsWith("_")
+    return wantsNewTab || isTargetBlank || isDownload || isTargetNamedTab
   },
 
   isUnloadableFormSubmit(e){
@@ -137,20 +138,27 @@ let DOM = {
     return this.all(el, `${PHX_VIEW_SELECTOR}[${PHX_PARENT_ID}="${parentId}"]`)
   },
 
-  findParentCIDs(node, cids){
-    let initial = new Set(cids)
-    let parentCids =
-      cids.reduce((acc, cid) => {
-        let selector = `[${PHX_COMPONENT}="${cid}"] [${PHX_COMPONENT}]`
+  findExistingParentCIDs(node, cids){
+    // we only want to find parents that exist on the page
+    // if a cid is not on the page, the only way it can be added back to the page
+    // is if a parent adds it back, therefore if a cid does not exist on the page,
+    // we should not try to render it by itself (because it would be rendered twice,
+    // one by the parent, and a second time by itself)
+    let parentCids = new Set()
+    let childrenCids = new Set()
 
-        this.filterWithinSameLiveView(this.all(node, selector), node)
+    cids.forEach(cid => {
+      this.filterWithinSameLiveView(this.all(node, `[${PHX_COMPONENT}="${cid}"]`), node).forEach(parent => {
+        parentCids.add(cid)
+        this.all(parent, `[${PHX_COMPONENT}]`)
           .map(el => parseInt(el.getAttribute(PHX_COMPONENT)))
-          .forEach(childCID => acc.delete(childCID))
+          .forEach(childCID => childrenCids.add(childCID))
+      })
+    })
 
-        return acc
-      }, initial)
+    childrenCids.forEach(childCid => parentCids.delete(childCid))
 
-    return parentCids.size === 0 ? new Set(cids) : parentCids
+    return parentCids
   },
 
   filterWithinSameLiveView(nodes, parent){
@@ -235,10 +243,10 @@ let DOM = {
             return false
           } else {
             callback()
-            this.putPrivate(el, THROTTLED, true)
-            setTimeout(() => {
+            const t = setTimeout(() => {
               if(asyncFilter()){ this.triggerCycle(el, DEBOUNCE_TRIGGER) }
             }, timeout)
+            this.putPrivate(el, THROTTLED, t)
           }
         } else {
           setTimeout(() => {
@@ -258,8 +266,11 @@ let DOM = {
         }
         if(this.once(el, "bind-debounce")){
           el.addEventListener("blur", () => {
-            // always trigger callback on blur
-            callback()
+            // because we trigger the callback here,
+            // we also clear the throttle timeout to prevent the callback
+            // from being called again after the timeout fires
+            clearTimeout(this.private(el, THROTTLED))
+            this.triggerCycle(el, DEBOUNCE_TRIGGER)
           })
         }
     }
@@ -398,7 +409,6 @@ let DOM = {
     if(!DOM.isTextualInput(focused)){ return }
 
     let wasFocused = focused.matches(":focus")
-    if(focused.readOnly){ focused.blur() }
     if(!wasFocused){ focused.focus() }
     if(this.hasSelectionRange(focused)){
       focused.setSelectionRange(selectionStart, selectionEnd)
@@ -445,7 +455,7 @@ let DOM = {
         if(!childNode.id){
           // Skip warning if it's an empty text node (e.g. a new-line)
           let isEmptyTextNode = childNode.nodeType === Node.TEXT_NODE && childNode.nodeValue.trim() === ""
-          if(!isEmptyTextNode){
+          if(!isEmptyTextNode && childNode.nodeType !== Node.COMMENT_NODE){
             logError("only HTML element tags with an id are allowed inside containers with phx-update.\n\n" +
               `removing illegal node: "${(childNode.outerHTML || childNode.nodeValue).trim()}"\n\n`)
           }

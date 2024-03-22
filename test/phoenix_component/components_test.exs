@@ -108,7 +108,7 @@ defmodule Phoenix.LiveView.ComponentsTest do
       assert t2h(
                ~H|<.link href="/users" method="post" csrf_token="123" data-confirm="are you sure?">delete</.link>|
              ) ==
-               ~X"<a href=\"/users\" data-method=\"post\" data-csrf=\"123\" data-to=\"/users\" data-confirm=\"are you sure?\">delete</a>"
+               ~X|<a href="/users" data-method="post" data-csrf="123" data-to="/users" data-confirm="are you sure?">delete</a>|
     end
 
     test "js schemes" do
@@ -567,6 +567,17 @@ defmodule Phoenix.LiveView.ComponentsTest do
 
       assert t2h(~H|<.live_file_input upload={@conf} webkitdirectory />|) ==
                ~X|<input type="file" accept="" data-phx-hook="Phoenix.LiveFileUpload" data-phx-update="ignore" data-phx-active-refs="foo" data-phx-done-refs="" data-phx-preflighted-refs="" webkitdirectory>|
+    end
+
+    test "renders optional capture attribute" do
+      assigns = %{
+        conf: %Phoenix.LiveView.UploadConfig{
+          entries: [%{preflighted?: false, done?: false, ref: "foo"}]
+        }
+      }
+
+      assert t2h(~H|<.live_file_input upload={@conf} capture="user" />|) ==
+               ~X|<input type="file" accept="" data-phx-hook="Phoenix.LiveFileUpload" data-phx-update="ignore" data-phx-active-refs="foo" data-phx-done-refs="" data-phx-preflighted-refs="" capture="user">|
     end
 
     test "sets accept from config" do

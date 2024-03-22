@@ -1,5 +1,5 @@
 defmodule Phoenix.LiveView.LayoutTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   import Phoenix.ConnTest
 
   import Phoenix.LiveViewTest
@@ -74,6 +74,10 @@ defmodule Phoenix.LiveView.LayoutTest do
 
   test "uses root page title on first render", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/styled-elements")
+    assert page_title(view) == "Styled"
+
+    {:ok, view, _html} = live(conn, "/styled-elements")
+    render_click(view, "#live-push-patch-button")
     assert page_title(view) == "Styled"
 
     {:ok, no_title_tag_view, _html} = live(conn, "/parent_layout")

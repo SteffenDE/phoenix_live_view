@@ -77,7 +77,20 @@ describe("DOM", () => {
       currentLoc = new URL("https://test.local/foo")
       let event = e("/foo")
       event.defaultPrevented = true
-      expect(DOM.isNewPageClick(e, currentLoc)).toBe(false)
+      expect(DOM.isNewPageClick(event, currentLoc)).toBe(false)
+    })
+
+    test("ignores mailto and tel links", () => {
+      expect(DOM.isNewPageClick(e("mailto:foo"), new URL("https://test.local/foo"))).toBe(false)
+      expect(DOM.isNewPageClick(e("tel:1234"), new URL("https://test.local/foo"))).toBe(false)
+    })
+
+    test("ignores contenteditable", () => {
+      let currentLoc
+      currentLoc = new URL("https://test.local/foo")
+      let event = e("/bar")
+      event.target.isContentEditable = true
+      expect(DOM.isNewPageClick(event, currentLoc)).toBe(false)
     })
   })
 
@@ -107,7 +120,7 @@ describe("DOM", () => {
     })
   })
 
-  describe("findParentCIDs", () => {
+  describe("findExistingParentCIDs", () => {
     test("returns only parent cids", () => {
       let view = tag("div", {}, `
         <div data-phx-main="true"
@@ -120,19 +133,17 @@ describe("DOM", () => {
       `)
       document.body.appendChild(view)
 
-      expect(DOM.findParentCIDs(view, [1, 2, 3])).toEqual(new Set([1, 2, 3]))
-
       view.appendChild(tag("div", {"data-phx-component": 1}, `
         <div data-phx-component="2"></div>
       `))
-      expect(DOM.findParentCIDs(view, [1, 2, 3])).toEqual(new Set([1, 3]))
+      expect(DOM.findExistingParentCIDs(view, [1, 2])).toEqual(new Set([1]))
 
       view.appendChild(tag("div", {"data-phx-component": 1}, `
         <div data-phx-component="2">
           <div data-phx-component="3"></div>
         </div>
       `))
-      expect(DOM.findParentCIDs(view, [1, 2, 3])).toEqual(new Set([1]))
+      expect(DOM.findExistingParentCIDs(view, [1, 2, 3])).toEqual(new Set([1]))
     })
   })
 

@@ -8,6 +8,7 @@ defmodule Phoenix.LiveView.AssignAsyncTest do
   @endpoint Endpoint
 
   setup do
+    Process.flag(:trap_exit, true)
     {:ok, conn: Plug.Test.init_test_session(Phoenix.ConnTest.build_conn(), %{})}
   end
 
@@ -50,9 +51,14 @@ defmodule Phoenix.LiveView.AssignAsyncTest do
     end
 
     test "lv exit brings down asyncs", %{conn: conn} do
+      Process.register(self(), :assign_async_test_process)
       {:ok, lv, _html} = live(conn, "/assign_async?test=lv_exit")
-      Process.unlink(lv.pid)
       lv_ref = Process.monitor(lv.pid)
+
+      receive do
+        :async_ready -> :ok
+      end
+
       async_ref = Process.monitor(Process.whereis(:lv_exit))
       send(lv.pid, :boom)
 
@@ -61,8 +67,13 @@ defmodule Phoenix.LiveView.AssignAsyncTest do
     end
 
     test "cancel_async", %{conn: conn} do
+      Process.register(self(), :assign_async_test_process)
       {:ok, lv, _html} = live(conn, "/assign_async?test=cancel")
-      Process.unlink(lv.pid)
+
+      receive do
+        :async_ready -> :ok
+      end
+
       async_ref = Process.monitor(Process.whereis(:cancel))
       send(lv.pid, :cancel)
 
@@ -154,9 +165,14 @@ defmodule Phoenix.LiveView.AssignAsyncTest do
     end
 
     test "lv exit brings down asyncs", %{conn: conn} do
+      Process.register(self(), :assign_async_test_process)
       {:ok, lv, _html} = live(conn, "/assign_async?test=lc_lv_exit")
-      Process.unlink(lv.pid)
       lv_ref = Process.monitor(lv.pid)
+
+      receive do
+        :async_ready -> :ok
+      end
+
       async_ref = Process.monitor(Process.whereis(:lc_exit))
       send(lv.pid, :boom)
 
@@ -165,8 +181,13 @@ defmodule Phoenix.LiveView.AssignAsyncTest do
     end
 
     test "cancel_async", %{conn: conn} do
+      Process.register(self(), :assign_async_test_process)
       {:ok, lv, _html} = live(conn, "/assign_async?test=lc_cancel")
-      Process.unlink(lv.pid)
+
+      receive do
+        :async_ready -> :ok
+      end
+
       async_ref = Process.monitor(Process.whereis(:lc_cancel))
 
       Phoenix.LiveView.send_update(lv.pid, Phoenix.LiveViewTest.AssignAsyncLive.LC,

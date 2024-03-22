@@ -123,7 +123,8 @@ defmodule Phoenix.LiveView.UploadConfig do
           ref: String.t(),
           auto_upload?: boolean(),
           writer:
-            (name :: atom() | String.t(), UploadEntry.t(), Phoenix.LiveView.Socket.t() -> {module(), term()}),
+            (name :: atom() | String.t(), UploadEntry.t(), Phoenix.LiveView.Socket.t() ->
+               {module(), term()}),
           progress_event:
             (name :: atom() | String.t(), UploadEntry.t(), Phoenix.LiveView.Socket.t() ->
                {:noreply, Phoenix.LiveView.Socket.t()})
@@ -153,7 +154,7 @@ defmodule Phoenix.LiveView.UploadConfig do
             * A valid case-insensitive filename extension, starting with a period (".") character.
               For example: .jpg, .pdf, or .doc.
 
-            * A valid MIME type string, with no extensions.
+            * A valid MIME type string, such as "image/jpeg" or "image/*"
 
           Alternately, you can provide the atom :any to allow any kind of file. Got:
 
@@ -356,23 +357,15 @@ defmodule Phoenix.LiveView.UploadConfig do
   end
 
   @doc false
-  def mark_preflighted(%UploadConfig{} = conf) do
-    refs_awaiting = refs_awaiting_preflight(conf)
-
+  def mark_preflighted(%UploadConfig{} = conf, refs) do
     new_entries =
       for entry <- conf.entries do
-        %UploadEntry{entry | preflighted?: entry.preflighted? || entry.ref in refs_awaiting}
+        %UploadEntry{entry | preflighted?: entry.preflighted? || entry.ref in refs}
       end
 
     new_conf = %UploadConfig{conf | entries: new_entries}
 
-    {new_conf, for(ref <- refs_awaiting, do: get_entry_by_ref(new_conf, ref))}
-  end
-
-  defp refs_awaiting_preflight(%UploadConfig{} = conf) do
-    for {entry, i} <- Enum.with_index(conf.entries),
-        i < conf.max_entries && not entry.preflighted?,
-        do: entry.ref
+    {new_conf, for(ref <- refs, do: get_entry_by_ref(new_conf, ref))}
   end
 
   @doc false
@@ -561,7 +554,7 @@ defmodule Phoenix.LiveView.UploadConfig do
       client_size: Map.fetch!(client_entry, "size"),
       client_type: Map.fetch!(client_entry, "type"),
       client_last_modified: Map.get(client_entry, "last_modified"),
-      client_meta: Map.get(client_entry, "meta"),
+      client_meta: Map.get(client_entry, "meta")
     }
 
     {:ok, entry}

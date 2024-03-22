@@ -1,18 +1,18 @@
 defmodule Phoenix.LiveView.MixProject do
   use Mix.Project
 
-  @version "0.20.4"
+  @version "0.20.14"
 
   def project do
     [
       app: :phoenix_live_view,
       version: @version,
-      elixir: "~> 1.12",
+      elixir: "~> 1.13",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       test_options: [docs: true],
-      package: package(),
       xref: [exclude: [Floki]],
+      package: package(),
       deps: deps(),
       aliases: aliases(),
       docs: &docs/0,
@@ -39,13 +39,13 @@ defmodule Phoenix.LiveView.MixProject do
     [
       {:phoenix, "~> 1.6.15 or ~> 1.7.0"},
       {:plug, "~> 1.15"},
-      {:phoenix_view, "~> 2.0", optional: true},
       {:phoenix_template, "~> 1.0"},
-      {:phoenix_html, "~> 3.3 or ~> 4.0"},
-      {:esbuild, "~> 0.2", only: :dev},
+      {:phoenix_html, "~> 3.3 or ~> 4.0 or ~> 4.1"},
       {:telemetry, "~> 0.4.2 or ~> 1.0"},
+      {:esbuild, "~> 0.2", only: :dev},
+      {:phoenix_view, "~> 2.0", optional: true},
       {:jason, "~> 1.0", optional: true},
-      {:floki, "~> 0.30.0", only: :test},
+      {:floki, "~> 0.36", optional: true},
       {:ex_doc, "~> 0.29", only: :docs},
       {:makeup_eex, ">= 0.1.1", only: :docs},
       {:makeup_diff, "~> 0.1", only: :docs},

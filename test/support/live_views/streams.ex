@@ -7,7 +7,24 @@ defmodule Phoenix.LiveViewTest.StreamLive do
 
   def render(%{invalid_consume: true} = assigns) do
     ~H"""
-    <div :for={{id, _user} <- Enum.map(@streams.users, &(&1))} id={id} />
+    <div :for={{id, _user} <- Enum.map(@streams.users, & &1)} id={id} />
+    """
+  end
+
+  def render(%{invalid_ids: true} = assigns) do
+    ~H"""
+    <div id="users" phx-update="stream">
+      <div :for={{id, _user} <- @streams.users} id={"prefixed-#{id}"} />
+    </div>
+    """
+  end
+
+  def render(%{invalid_item: true} = assigns) do
+    ~H"""
+    <div id="users" phx-update="stream">
+      <div :for={{id, _user} <- @streams.users} id={id} />
+      <div id="another-item"></div>
+    </div>
     """
   end
 
@@ -20,7 +37,9 @@ defmodule Phoenix.LiveViewTest.StreamLive do
         <button phx-click="update" phx-value-id={id}>update</button>
         <button phx-click="move-to-first" phx-value-id={id}>make first</button>
         <button phx-click="move-to-last" phx-value-id={id}>make last</button>
-        <button phx-click="move" phx-value-id={id} phx-value-name="moved" phx-value-at="1">move</button>
+        <button phx-click="move" phx-value-id={id} phx-value-name="moved" phx-value-at="1">
+          move
+        </button>
       </div>
     </div>
     <div id="admins" phx-update="stream">
@@ -53,6 +72,8 @@ defmodule Phoenix.LiveViewTest.StreamLive do
     {:ok,
      socket
      |> assign(:invalid_consume, false)
+     |> assign(:invalid_ids, false)
+     |> assign(:invalid_item, false)
      |> stream(:users, @users)
      |> stream(:admins, [user(1, "chris-admin"), user(2, "callan-admin")])}
   end
@@ -134,6 +155,14 @@ defmodule Phoenix.LiveViewTest.StreamLive do
 
   def handle_event("consume-stream-invalid", _, socket) do
     {:noreply, assign(socket, :invalid_consume, true)}
+  end
+
+  def handle_event("stream-invalid-ids", _, socket) do
+    {:noreply, assign(socket, :invalid_ids, true) |> stream(:users, @users)}
+  end
+
+  def handle_event("stream-invalid-item", _, socket) do
+    {:noreply, assign(socket, :invalid_item, true) |> stream(:users, @users)}
   end
 
   def handle_call({:run, func}, _, socket), do: func.(socket)
@@ -272,7 +301,7 @@ defmodule Phoenix.LiveViewTest.StreamResetLive do
 
   # see https://github.com/phoenixframework/phoenix_live_view/issues/2994
 
-  def mount(_params, _session, socket) do
+  def mount(params, _session, socket) do
     socket
     |> stream(:items, [
       %{id: "a", name: "A"},
@@ -280,13 +309,18 @@ defmodule Phoenix.LiveViewTest.StreamResetLive do
       %{id: "c", name: "C"},
       %{id: "d", name: "D"}
     ])
+    |> assign(:use_phx_remove, is_map(params) && params["phx-remove"])
     |> then(&{:ok, &1})
   end
 
   def render(assigns) do
     ~H"""
     <ul phx-update="stream" id="thelist">
-      <li id={id} :for={{id, item} <- @streams.items}>
+      <li
+        :for={{id, item} <- @streams.items}
+        id={id}
+        phx-remove={if @use_phx_remove, do: Phoenix.LiveView.JS.hide()}
+      >
         <%= item.name %>
       </li>
     </ul>
@@ -483,7 +517,12 @@ defmodule Phoenix.LiveViewTest.StreamResetLCLive do
   def render(assigns) do
     ~H"""
     <ul phx-update="stream" id="thelist">
-      <.live_component module={InnerComponent} id={id} item={item} :for={{id, item} <- @streams.items}/>
+      <.live_component
+        :for={{id, item} <- @streams.items}
+        module={InnerComponent}
+        id={id}
+        item={item}
+      />
     </ul>
 
     <button phx-click="reorder">Reorder</button>
@@ -506,8 +545,8 @@ defmodule Phoenix.LiveViewTest.StreamLimitLive do
   def render(assigns) do
     ~H"""
     <form phx-submit="configure">
-      at: <input type="text" name="at" value={@at}/>
-      limit: <input type="text" name="limit" value={@limit}/>
+      at: <input type="text" name="at" value={@at} /> limit:
+      <input type="text" name="limit" value={@limit} />
       <button type="submit">recreate stream</button>
     </form>
 
@@ -575,5 +614,195 @@ defmodule Phoenix.LiveViewTest.StreamLimitLive do
     socket
     |> assign(last_id: 10)
     |> stream(:items, items, opts)
+  end
+end
+
+defmodule Phoenix.LiveViewTest.StreamNestedLive do
+  use Phoenix.LiveView
+
+  def mount(_params, _session, socket) do
+    :timer.send_interval(50, self(), :tick)
+
+    {:ok, assign(socket, :foo, 1)}
+  end
+
+  def handle_info(:tick, socket) do
+    {:noreply, update(socket, :foo, &(&1 + 1))}
+  end
+
+  def render(assigns) do
+    ~H"""
+    <div id="nested-container">
+      <%= @foo %>
+      <%= live_render(@socket, Phoenix.LiveViewTest.StreamResetLive, id: "nested") %>
+    </div>
+    """
+  end
+end
+
+defmodule Phoenix.LiveViewTest.StreamInsideForLive do
+  # https://github.com/phoenixframework/phoenix_live_view/issues/3129
+  use Phoenix.LiveView
+
+  def mount(_params, _session, socket) do
+    socket
+    |> stream(:items, [])
+    |> start_async(:foo, fn ->
+      Process.sleep(50)
+    end)
+    |> then(&{:ok, &1})
+  end
+
+  def handle_async(:foo, {:ok, _}, socket) do
+    {:noreply,
+     stream(socket, :items, [
+       %{id: "a", name: "A"},
+       %{id: "b", name: "B"},
+       %{id: "c", name: "C"},
+       %{id: "d", name: "D"}
+     ])}
+  end
+
+  def render(assigns) do
+    ~H"""
+    <div :for={_i <- [1]}>
+      <ul phx-update="stream" id="thelist">
+        <li :for={{id, item} <- @streams.items} id={id}>
+          <%= item.name %>
+        </li>
+      </ul>
+    </div>
+    """
+  end
+end
+
+defmodule Phoenix.LiveViewTest.StreamNestedComponentResetLive do
+  use Phoenix.LiveView
+
+  defmodule InnerComponent do
+    use Phoenix.LiveComponent
+
+    # we already initialized the stream
+    def update(assigns, %{assigns: %{id: _}} = socket) do
+      {:ok, assign(socket, assigns)}
+    end
+
+    # first mount
+    def update(assigns, socket) do
+      socket
+      |> assign(assigns)
+      |> stream(
+        :nested,
+        [
+          %{id: assigns.id <> "-a", name: "N-A"},
+          %{id: assigns.id <> "-b", name: "N-B"},
+          %{id: assigns.id <> "-c", name: "N-C"},
+          %{id: assigns.id <> "-d", name: "N-D"}
+        ],
+        reset: true
+      )
+      |> then(&{:ok, &1})
+    end
+
+    def handle_event("reorder", _, socket) do
+      socket =
+        stream(
+          socket,
+          :nested,
+          [
+            %{id: socket.assigns.id <> "-e", name: "N-E"},
+            %{id: socket.assigns.id <> "-a", name: "N-A"},
+            %{id: socket.assigns.id <> "-f", name: "N-F"},
+            %{id: socket.assigns.id <> "-g", name: "N-G"}
+          ],
+          reset: true
+        )
+
+      {:noreply, socket}
+    end
+
+    def render(assigns) do
+      ~H"""
+      <li id={@id}>
+        <%= @item.name %>
+        <div id={@id <> "-nested"} phx-update="stream" style="display: flex; gap: 4px;">
+          <span :for={{id, item} <- @streams.nested} id={id}><%= item.name %></span>
+        </div>
+        <button phx-click="reorder" phx-target={@myself}>Reorder</button>
+      </li>
+      """
+    end
+  end
+
+  def render(assigns) do
+    ~H"""
+    <ul phx-update="stream" id="thelist">
+      <.live_component
+        :for={{id, item} <- @streams.items}
+        module={InnerComponent}
+        id={id}
+        item={item}
+      />
+    </ul>
+
+    <button phx-click="reorder" id="parent-reorder">Reorder</button>
+    """
+  end
+
+  def mount(_params, _session, socket) do
+    socket
+    |> stream(:items, [
+      %{id: "a", name: "A"},
+      %{id: "b", name: "B"},
+      %{id: "c", name: "C"},
+      %{id: "d", name: "D"}
+    ])
+    |> then(&{:ok, &1})
+  end
+
+  def handle_event("reorder", _, socket) do
+    socket =
+      stream(
+        socket,
+        :items,
+        [
+          %{id: "e", name: "E"},
+          %{id: "a", name: "A"},
+          %{id: "f", name: "F"},
+          %{id: "g", name: "G"}
+        ],
+        reset: true
+      )
+
+    {:noreply, socket}
+  end
+end
+
+defmodule Phoenix.LiveViewTest.HighFrequencyStreamAndNoStreamUpdatesLive do
+  use Phoenix.LiveView
+
+  def mount(_params, _session, socket) do
+    :timer.send_interval(50, self(), :tick)
+
+    {:ok, assign(socket, :foo, 1) |> stream(:items, [])}
+  end
+
+  def handle_info(:tick, socket) do
+    {:noreply, update(socket, :foo, &(&1 + 1))}
+  end
+
+  def handle_event("insert_item", _, socket) do
+    {:noreply, stream_insert(socket, :items, %{id: System.unique_integer(), name: "Item"})}
+  end
+
+  def render(assigns) do
+    ~H"""
+    <div id="mystream" phx-update="stream">
+      <div :for={{id, item} <- @streams.items} id={id}>
+        <%= item.name %>, <%= item.id %>
+      </div>
+    </div>
+    <p><%= @foo %></p>
+    """
   end
 end

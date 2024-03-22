@@ -100,6 +100,26 @@ defmodule Phoenix.LiveView do
          |> assign_async([:profile, :rank], fn -> {:ok, %{profile: ..., rank: ...}} end)}
       end
 
+  > ### Warning {: .warning}
+  >
+  > When using async operations it is important to not pass the socket into the function
+  > as it will copy the whole socket struct to the Task process, which can be very expensive.
+  >
+  > Instead of:
+  >
+  > ```elixir
+  > assign_async(:org, fn -> {:ok, %{org: fetch_org(socket.assigns.slug)}} end)
+  > ```
+  >
+  > We should do:
+  >
+  > ```elixir
+  > slug = socket.assigns.slug
+  > assign_async(:org, fn -> {:ok, %{org: fetch_org(slug)}} end)
+  > ```
+  >
+  > See: https://hexdocs.pm/elixir/process-anti-patterns.html#sending-unnecessary-data
+
   The state of the async operation is stored in the socket assigns within an
   `Phoenix.LiveView.AsyncResult`. It carries the loading and failed states, as
   well as the result. For example, if we wanted to show the loading states in
@@ -317,7 +337,7 @@ defmodule Phoenix.LiveView do
 
       use Phoenix.LiveView,
         container: {:tr, class: "colorized"},
-        layout: {MyAppWeb.LayoutView, :app},
+        layout: {MyAppWeb.Layouts, :app},
         log: :info
 
   ## Options
@@ -723,8 +743,10 @@ defmodule Phoenix.LiveView do
 
   ## Options
 
-    * `:accept` - Required. A list of unique file type specifiers or the
-      atom :any to allow any kind of file. For example, `[".jpeg"]`, `:any`, etc.
+    * `:accept` - Required. A list of unique file extensions (such as ".jpeg") or
+      mime type (such as "image/jpeg" or "image/*"). You may also pass the atom
+      `:any` instead of a list to support to allow any kind of file.
+      For example, `[".jpeg"]`, `:any`, etc.
 
     * `:max_entries` - The maximum number of selected files to allow per
       file input. Defaults to 1.
@@ -1398,7 +1420,7 @@ defmodule Phoenix.LiveView do
 
   > Note: This function is for server-side lifecycle callbacks.
   > For client-side hooks, see the
-  > [JS Interop guide](js-interop.html#client-hooks).
+  > [JS Interop guide](js-interop.html#client-hooks-via-phx-hook).
 
   Hooks provide a mechanism to tap into key stages of the LiveView
   lifecycle in order to bind/update assigns, intercept events,
@@ -1407,7 +1429,8 @@ defmodule Phoenix.LiveView do
   lifecycle stages: `:handle_params`, `:handle_event`, `:handle_info`, `:handle_async`, and
   `:after_render`. To attach a hook to the `:mount` stage, use `on_mount/1`.
 
-  > Note: only `:after_render` hooks are currently supported in LiveComponents.
+  > Note: only `:after_render` and `:handle_event` hooks are currently supported in
+  > LiveComponents.
 
   ## Return Values
 
@@ -1504,7 +1527,7 @@ defmodule Phoenix.LiveView do
 
   > Note: This function is for server-side lifecycle callbacks.
   > For client-side hooks, see the
-  > [JS Interop guide](js-interop.html#client-hooks).
+  > [JS Interop guide](js-interop.html#client-hooks-via-phx-hook).
 
   If no hook is found, this function is a no-op.
 
@@ -1765,7 +1788,7 @@ defmodule Phoenix.LiveView do
       end
 
   See `stream_delete_by_dom_id/3` to remove an item without requiring the
-  original datastructure.
+  original data structure.
   """
   def stream_delete(%Socket{} = socket, name, item) do
     update_stream(socket, name, &LiveStream.delete_item(&1, item))
@@ -1776,7 +1799,7 @@ defmodule Phoenix.LiveView do
 
   Behaves just like `stream_delete/3`, but accept the precomputed DOM id,
   which allows deleting from a stream without fetching or building the original
-  stream datastructure.
+  stream data structure.
 
   ## Examples
 
@@ -1906,10 +1929,8 @@ defmodule Phoenix.LiveView do
         send_update(parent, Component, data)
       end)
   """
-  def assign_async(%Socket{} = socket, key_or_keys, func, opts \\ [])
-      when (is_atom(key_or_keys) or is_list(key_or_keys)) and
-             is_function(func, 0) do
-    Async.assign_async(socket, key_or_keys, func, opts)
+  defmacro assign_async(socket, key_or_keys, func, opts \\ []) do
+    Async.assign_async(socket, key_or_keys, func, opts, __CALLER__)
   end
 
   @doc """
@@ -1921,6 +1942,10 @@ defmodule Phoenix.LiveView do
   of the caller LiveView or LiveComponent.
 
   The task is only started when the socket is connected.
+
+  ## Options
+
+    * `:supervisor` - allows you to specify a `Task.Supervisor` to supervise the task.
 
   ## Examples
 
@@ -1943,8 +1968,8 @@ defmodule Phoenix.LiveView do
 
   See the moduledoc for more information.
   """
-  def start_async(%Socket{} = socket, name, func) when is_function(func, 0) do
-    Async.start_async(socket, name, func)
+  defmacro start_async(socket, name, func, opts \\ []) do
+    Async.start_async(socket, name, func, opts, __CALLER__)
   end
 
   @doc """

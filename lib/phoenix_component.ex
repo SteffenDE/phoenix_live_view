@@ -528,8 +528,10 @@ defmodule Phoenix.Component do
   are enabled:
 
   ```html
+  <!-- @caller lib/app_web/home_live.ex:20 -->
   <!-- <AppWeb.CoreComponents.header> lib/app_web/core_components.ex:123 -->
   <header class="p-5">
+    <!-- @caller lib/app_web/home_live.ex:48 -->
     <!-- <AppWeb.CoreComponents.button> lib/app_web/core_components.ex:456 -->
     <button class="px-2 bg-indigo-500 text-white">Click</button>
     <!-- </AppWeb.CoreComponents.button> -->
@@ -791,8 +793,6 @@ defmodule Phoenix.Component do
       raise "~H requires a variable named \"assigns\" to exist and be set to a map"
     end
 
-    debug_annotations? = Module.get_attribute(__CALLER__.module, :__debug_annotations__)
-
     options = [
       engine: Phoenix.LiveView.TagEngine,
       file: __CALLER__.file,
@@ -800,9 +800,7 @@ defmodule Phoenix.Component do
       caller: __CALLER__,
       indentation: meta[:indentation] || 0,
       source: expr,
-      tag_handler: Phoenix.LiveView.HTMLEngine,
-      annotate_tagged_content:
-        debug_annotations? && (&Phoenix.LiveView.HTMLEngine.annotate_tagged_content/1)
+      tag_handler: Phoenix.LiveView.HTMLEngine
     ]
 
     EEx.compile_string(expr, options)
@@ -1055,12 +1053,11 @@ defmodule Phoenix.Component do
   def live_flash(%{} = flash, key), do: Map.get(flash, to_string(key))
 
   @doc """
-  Returns the errors for an upload.
+  Returns errors for the upload as a whole.
 
-  Note this function returns errors that apply to the allowed upload as a whole. For errors that
-  apply to a specific uploaded entry, use `upload_errors/2`.
+  For errors that apply to a specific upload entry, use `upload_errors/2`.
 
-  The following error may be returned:
+  The output is a list. The following error may be returned:
 
   * `:too_many_files` - The number of selected files exceeds the `:max_entries` constraint
 
@@ -1079,9 +1076,11 @@ defmodule Phoenix.Component do
   end
 
   @doc """
-  Returns the entry errors for an upload.
+  Returns errors for the upload entry.
 
-  The following errors may be returned:
+  For errors that apply to the upload as a whole, use `upload_errors/1`.
+
+  The output is a list. The following errors may be returned:
 
   * `:too_large` - The entry exceeds the `:max_file_size` constraint
   * `:not_accepted` - The entry does not match the `:accept` MIME types
@@ -1182,17 +1181,26 @@ defmodule Phoenix.Component do
 
   ### When connected
 
-  LiveView is also able to share assigns via `assign_new` within nested LiveView. If the parent
-  LiveView defines a `:current_user` assign and the child LiveView also uses `assign_new/3` to
-  fetch the `:current_user` in its `mount/3` callback, as above, the assign will be fetched from
-  the parent LiveView, once again avoiding additional database queries.
+  LiveView is also able to share assigns via `assign_new` with children LiveViews,
+  as long as the child LiveView is also mounted when the parent LiveView is mounted.
+  Let's see an example.
+
+  If the parent LiveView defines a `:current_user` assign and the child LiveView also
+  uses `assign_new/3` to fetch the `:current_user` in its `mount/3` callback, as in
+  the previous subsection, the assign will be fetched from the parent LiveView, once
+  again avoiding additional database queries.
 
   Note that `fun` also provides access to the previously assigned values:
 
       assigns =
-          assigns
-          |> assign_new(:foo, fn -> "foo" end)
-          |> assign_new(:bar, fn %{foo: foo} -> foo <> "bar" end)
+        assigns
+        |> assign_new(:foo, fn -> "foo" end)
+        |> assign_new(:bar, fn %{foo: foo} -> foo <> "bar" end)
+
+  Assigns sharing is performed when possible but not guaranteed. Therefore, you must
+  ensure the result of the function given to `assign_new/3` is the same as if the value
+  was fetched from the parent. Otherwise consider passing values to the child LiveView
+  as part of its session.
   '''
   def assign_new(socket_or_assigns, key, fun)
 
@@ -2802,7 +2810,7 @@ defmodule Phoenix.Component do
     assigns =
       assigns
       |> assign(:tag, tag)
-      |> assign(:escaped_attrs, Phoenix.LiveView.TagEngine.attributes_escape(rest))
+      |> assign(:escaped_attrs, Phoenix.LiveView.HTMLEngine.attributes_escape(rest))
 
     if assigns.inner_block != [] do
       ~H"""
@@ -2860,7 +2868,7 @@ defmodule Phoenix.Component do
       "the optional override for the accept attribute. Defaults to :accept specified by allow_upload"
   )
 
-  attr.(:rest, :global, include: ~w(webkitdirectory required disabled))
+  attr.(:rest, :global, include: ~w(webkitdirectory required disabled capture form))
 
   def live_file_input(%{upload: upload} = assigns) do
     assigns = assign_new(assigns, :accept, fn -> upload.accept != :any && upload.accept end)
