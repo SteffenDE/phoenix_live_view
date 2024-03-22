@@ -97,7 +97,7 @@ defmodule Phoenix.LiveViewTest.E2E.Router do
     live "/form/feedback", Phoenix.LiveViewTest.E2E.FormFeedbackLive
   end
 
-  scope "/issues" do
+  scope "/issues", Phoenix.LiveViewTest.E2E do
     pipe_through(:browser)
 
     live "/2965", Issue2965Live

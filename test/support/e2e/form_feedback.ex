@@ -6,6 +6,7 @@ defmodule Phoenix.LiveViewTest.E2E.FormFeedbackLive do
 
     def render("live.html", assigns) do
       ~H"""
+      <meta name="csrf-token" content={Plug.CSRFProtection.get_csrf_token()} />
       <script src="/assets/phoenix/phoenix.min.js"></script>
       <script src="/assets/phoenix_live_view/phoenix_live_view.js"></script>
       <script>
@@ -137,7 +138,8 @@ defmodule Phoenix.LiveViewTest.E2E.FormFeedbackLive do
           document.addEventListener("phx:patch-before-el-updated", onBeforeElUpdated)
           document.addEventListener("phx:patch-node-added", onNodeAdded)
         }
-        let liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket)
+        let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
+        let liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {params: {_csrf_token: csrfToken}})
         feedbackFor(liveSocket)
         liveSocket.connect()
         window.liveSocket = liveSocket
