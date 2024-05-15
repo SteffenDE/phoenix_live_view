@@ -70,6 +70,7 @@ defmodule Phoenix.LiveViewTest.E2E.Router do
 
       live "/upload", E2E.UploadLive
       live "/form", E2E.FormLive
+      live "/form/feedback", E2E.FormFeedbackLive
       live "/form/dynamic-inputs", E2E.FormDynamicInputsLive
       live "/js", E2E.JsLive
     end
@@ -96,8 +97,6 @@ defmodule Phoenix.LiveViewTest.E2E.Router do
   # these routes use a custom layout and therefore cannot be in the live_session
   scope "/", Phoenix.LiveViewTest.E2E do
     pipe_through(:browser)
-
-    live "/form/feedback", FormFeedbackLive
 
     scope "/issues" do
       live "/2965", Issue2965Live
