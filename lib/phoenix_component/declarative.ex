@@ -1082,12 +1082,20 @@ defmodule Phoenix.Component.Declarative do
       with [%{line: first_attr_line} | _] <- attrs do
         compile_error!(first_attr_line, env.file, """
         attributes must be defined before the first function clause at line #{meta[:line]}
+
+        This can happen when both the #{name}/1 component function and a template
+        of the same name are defined. Templates can still declare attributes and
+        slots, but the related function must be defined without a body.
         """)
       end
 
       with [%{line: first_slot_line} | _] <- slots do
         compile_error!(first_slot_line, env.file, """
         slots must be defined before the first function clause at line #{meta[:line]}
+
+        This can happen when both the #{name}/1 component function and a template
+        of the same name are defined. Templates can still declare attributes and
+        slots, but the related function must be defined without a body.
         """)
       end
     end
