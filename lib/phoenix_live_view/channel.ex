@@ -1162,7 +1162,8 @@ defmodule Phoenix.LiveView.Channel do
     _ -> {:error, :stale}
   end
 
-  defp verified_mount(
+  @doc false
+  def verified_mount(
          %Session{} = verified,
          config,
          route,
